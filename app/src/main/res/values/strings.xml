@@ -54,6 +54,9 @@
     <string name="action_delete">删除</string>
     <string name="script_op_failed">操作失败</string>
     <string name="script_op_success">操作成功</string>
+    <string name="script_capabilities_placeholder">支持平台/音质：请选择脚本</string>
+    <string name="script_capabilities_empty">未读取到脚本能力信息</string>
+    <string name="script_capabilities_any_quality">不限</string>
     <string name="no_logs">暂无系统日志</string>
     <string name="placeholder_number">0</string>
 

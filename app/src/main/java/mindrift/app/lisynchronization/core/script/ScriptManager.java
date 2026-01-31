@@ -65,6 +65,11 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
         return new ArrayList<>(scripts.keySet());
     }
 
+    public ScriptInfo getScriptInfo(String scriptId) {
+        if (scriptId == null) return null;
+        return scriptInfos.get(scriptId);
+    }
+
     public List<File> listScriptFiles() {
         return listScriptFilesInternal();
     }

@@ -16,6 +16,8 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import mindrift.app.lisynchronization.App;
@@ -24,6 +26,8 @@ import mindrift.app.lisynchronization.core.cache.CacheEntry;
 import mindrift.app.lisynchronization.core.cache.CacheManager;
 import mindrift.app.lisynchronization.core.proxy.RequestProxy;
 import mindrift.app.lisynchronization.core.script.ScriptManager;
+import mindrift.app.lisynchronization.core.script.ScriptInfo;
+import mindrift.app.lisynchronization.core.script.SourceInfo;
 import mindrift.app.lisynchronization.model.ResolveRequest;
 import mindrift.app.lisynchronization.utils.AppLogBuffer;
 
@@ -36,14 +40,16 @@ public class SettingsActivity extends AppCompatActivity {
     private TextView cacheListText;
     private TextView testResultText;
     private TextView logOutputText;
+    private TextView scriptCapabilitiesText;
     private AutoCompleteTextView scriptDropdown;
     private AutoCompleteTextView platformDropdown;
     private AutoCompleteTextView actionDropdown;
+    private AutoCompleteTextView qualityDropdown;
     private TextInputEditText songIdInput;
-    private TextInputEditText qualityInput;
     private final java.util.List<String> scriptOptions = new java.util.ArrayList<>();
     private final java.util.List<ActionItem> actionOptions = new java.util.ArrayList<>();
     private final java.util.List<PlatformItem> platformOptions = new java.util.ArrayList<>();
+    private final java.util.List<QualityItem> qualityOptions = new java.util.ArrayList<>();
     private final com.google.gson.Gson gson = new com.google.gson.Gson();
     private String lastResolvedUrl;
     private final AppLogBuffer.LogListener logListener = newLine -> runOnUiThread(this::refreshLogView);
@@ -62,11 +68,12 @@ public class SettingsActivity extends AppCompatActivity {
         cacheListText = findViewById(R.id.text_cache_list);
         testResultText = findViewById(R.id.text_test_result);
         logOutputText = findViewById(R.id.text_log_output);
+        scriptCapabilitiesText = findViewById(R.id.text_script_capabilities);
         scriptDropdown = findViewById(R.id.dropdown_script);
         platformDropdown = findViewById(R.id.dropdown_platform);
         actionDropdown = findViewById(R.id.dropdown_action);
+        qualityDropdown = findViewById(R.id.dropdown_quality);
         songIdInput = findViewById(R.id.input_song_id);
-        qualityInput = findViewById(R.id.input_quality);
 
         MaterialButton cacheRefreshButton = findViewById(R.id.button_cache_refresh);
         MaterialButton cacheClearButton = findViewById(R.id.button_cache_clear);
@@ -86,6 +93,16 @@ public class SettingsActivity extends AppCompatActivity {
             refreshLogView();
         });
         testResultText.setOnClickListener(v -> openResolvedUrl());
+        scriptDropdown.setOnItemClickListener((parent, view, position, id) -> {
+            if (position >= 0 && position < scriptOptions.size()) {
+                updateCapabilities(scriptOptions.get(position));
+            }
+        });
+        platformDropdown.setOnItemClickListener((parent, view, position, id) -> {
+            String scriptId = scriptDropdown.getText() == null ? "" : scriptDropdown.getText().toString();
+            ScriptInfo info = scriptManager.getScriptInfo(scriptId);
+            updateQualityOptions(info);
+        });
 
         setupDropdowns();
         AppLogBuffer.addListener(logListener);
@@ -160,15 +177,6 @@ public class SettingsActivity extends AppCompatActivity {
     private void setupDropdowns() {
         actionOptions.clear();
         actionOptions.add(new ActionItem(getString(R.string.action_music_url), "musicUrl"));
-        actionOptions.add(new ActionItem(getString(R.string.action_lyric), "lyric"));
-        actionOptions.add(new ActionItem(getString(R.string.action_pic), "pic"));
-
-        platformOptions.clear();
-        platformOptions.add(new PlatformItem(getString(R.string.platform_tx), "tx"));
-        platformOptions.add(new PlatformItem(getString(R.string.platform_wy), "wy"));
-        platformOptions.add(new PlatformItem(getString(R.string.platform_kg), "kg"));
-        platformOptions.add(new PlatformItem(getString(R.string.platform_kw), "kw"));
-        platformOptions.add(new PlatformItem(getString(R.string.platform_mg), "mg"));
 
         ArrayAdapter<String> actionAdapter = new ArrayAdapter<>(this,
                 android.R.layout.simple_list_item_1,
@@ -176,14 +184,6 @@ public class SettingsActivity extends AppCompatActivity {
         actionDropdown.setAdapter(actionAdapter);
         if (!actionOptions.isEmpty()) {
             actionDropdown.setText(actionOptions.get(0).label, false);
-        }
-
-        ArrayAdapter<String> platformAdapter = new ArrayAdapter<>(this,
-                android.R.layout.simple_list_item_1,
-                mapPlatformLabels());
-        platformDropdown.setAdapter(platformAdapter);
-        if (!platformOptions.isEmpty()) {
-            platformDropdown.setText(platformOptions.get(0).label, false);
         }
 
         updateScriptDropdown(scriptManager.getLoadedScriptIds());
@@ -202,6 +202,7 @@ public class SettingsActivity extends AppCompatActivity {
                 scriptOptions);
         scriptDropdown.setAdapter(scriptAdapter);
         scriptDropdown.setText(scriptOptions.get(0), false);
+        updateCapabilities(scriptOptions.get(0));
     }
 
     private void runTestRequest() {
@@ -209,7 +210,7 @@ public class SettingsActivity extends AppCompatActivity {
         String platformLabel = platformDropdown.getText() == null ? "" : platformDropdown.getText().toString();
         String actionLabel = actionDropdown.getText() == null ? "" : actionDropdown.getText().toString();
         String songId = songIdInput.getText() == null ? "" : songIdInput.getText().toString().trim();
-        String quality = qualityInput.getText() == null ? "" : qualityInput.getText().toString().trim();
+        String qualityLabel = qualityDropdown.getText() == null ? "" : qualityDropdown.getText().toString().trim();
 
         if (getString(R.string.no_scripts).equals(scriptLabel) || scriptLabel.isEmpty()) {
             testResultText.setText(getString(R.string.prompt_import_first));
@@ -222,6 +223,7 @@ public class SettingsActivity extends AppCompatActivity {
         String scriptId = scriptLabel;
         String platform = resolvePlatformValue(platformLabel);
         String action = resolveActionValue(actionLabel);
+        String quality = resolveQualityValue(qualityLabel);
 
         testResultText.setText(getString(R.string.request_in_progress));
         executor.execute(() -> {
@@ -259,6 +261,118 @@ public class SettingsActivity extends AppCompatActivity {
         if (clipboard != null) {
             clipboard.setPrimaryClip(ClipData.newPlainText(getString(R.string.clipboard_label), snapshot));
         }
+    }
+
+    private void updateCapabilities(String scriptId) {
+        if (scriptCapabilitiesText == null) return;
+        if (scriptId == null || getString(R.string.no_scripts).equals(scriptId)) {
+            scriptCapabilitiesText.setText(getString(R.string.script_capabilities_placeholder));
+            updatePlatformOptions(null);
+            updateQualityOptions(null);
+            return;
+        }
+        ScriptInfo info = scriptManager.getScriptInfo(scriptId);
+        if (info == null || info.getSources() == null || info.getSources().isEmpty()) {
+            scriptCapabilitiesText.setText(getString(R.string.script_capabilities_empty));
+            updatePlatformOptions(null);
+            updateQualityOptions(null);
+            return;
+        }
+        StringBuilder builder = new StringBuilder();
+        for (Map.Entry<String, SourceInfo> entry : info.getSources().entrySet()) {
+            String source = entry.getKey();
+            SourceInfo sourceInfo = entry.getValue();
+            if (sourceInfo == null) continue;
+            if (builder.length() > 0) builder.append('\n');
+            builder.append(formatPlatformLabel(source)).append(": ");
+            List<String> qualitys = sourceInfo.getQualitys();
+            if (qualitys == null || qualitys.isEmpty()) {
+                builder.append(getString(R.string.script_capabilities_any_quality));
+            } else {
+                builder.append(joinList(qualitys));
+            }
+        }
+        scriptCapabilitiesText.setText(builder.length() == 0
+                ? getString(R.string.script_capabilities_empty)
+                : builder.toString());
+        updatePlatformOptions(info);
+    }
+
+    private void updatePlatformOptions(ScriptInfo info) {
+        platformOptions.clear();
+        if (info != null && info.getSources() != null) {
+            for (Map.Entry<String, SourceInfo> entry : info.getSources().entrySet()) {
+                String source = entry.getKey();
+                SourceInfo sourceInfo = entry.getValue();
+                if (sourceInfo == null) continue;
+                if (sourceInfo.getType() != null && !"music".equalsIgnoreCase(sourceInfo.getType())) {
+                    continue;
+                }
+                platformOptions.add(new PlatformItem(formatPlatformLabel(source), source));
+            }
+        }
+        if (platformOptions.isEmpty()) {
+            platformOptions.add(new PlatformItem(getString(R.string.no_scripts), ""));
+        }
+        ArrayAdapter<String> platformAdapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_list_item_1,
+                mapPlatformLabels());
+        platformDropdown.setAdapter(platformAdapter);
+        platformDropdown.setText(platformOptions.get(0).label, false);
+        updateQualityOptions(info);
+    }
+
+    private void updateQualityOptions(ScriptInfo info) {
+        qualityOptions.clear();
+        String platform = resolvePlatformValue(platformDropdown.getText() == null ? "" : platformDropdown.getText().toString());
+        List<String> qualitys = null;
+        if (info != null && info.getSources() != null) {
+            SourceInfo sourceInfo = info.getSources().get(platform);
+            if (sourceInfo != null) {
+                qualitys = sourceInfo.getQualitys();
+            }
+        }
+        if (qualitys == null || qualitys.isEmpty()) {
+            qualityOptions.add(new QualityItem(getString(R.string.script_capabilities_any_quality), ""));
+        } else {
+            for (String q : qualitys) {
+                qualityOptions.add(new QualityItem(q, q));
+            }
+        }
+        ArrayAdapter<String> qualityAdapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_list_item_1,
+                mapQualityLabels());
+        qualityDropdown.setAdapter(qualityAdapter);
+        qualityDropdown.setText(qualityOptions.get(0).label, false);
+    }
+
+    private String formatPlatformLabel(String source) {
+        if (source == null) return "";
+        switch (source) {
+            case "tx":
+                return getString(R.string.platform_tx);
+            case "wy":
+                return getString(R.string.platform_wy);
+            case "kg":
+                return getString(R.string.platform_kg);
+            case "kw":
+                return getString(R.string.platform_kw);
+            case "mg":
+                return getString(R.string.platform_mg);
+            case "local":
+                return "本地";
+            default:
+                return source.toUpperCase(Locale.US);
+        }
+    }
+
+    private String joinList(List<String> items) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < items.size(); i++) {
+            if (i > 0) builder.append(" / ");
+            builder.append(items.get(i));
+        }
+        return builder.toString();
     }
 
     private String extractUrl(String response) {
@@ -328,6 +442,15 @@ public class SettingsActivity extends AppCompatActivity {
         return label;
     }
 
+    private String resolveQualityValue(String label) {
+        for (QualityItem item : qualityOptions) {
+            if (item.label.equals(label)) {
+                return item.value;
+            }
+        }
+        return label;
+    }
+
     private String[] mapActionLabels() {
         String[] labels = new String[actionOptions.size()];
         for (int i = 0; i < actionOptions.size(); i++) {
@@ -340,6 +463,14 @@ public class SettingsActivity extends AppCompatActivity {
         String[] labels = new String[platformOptions.size()];
         for (int i = 0; i < platformOptions.size(); i++) {
             labels[i] = platformOptions.get(i).label;
+        }
+        return labels;
+    }
+
+    private String[] mapQualityLabels() {
+        String[] labels = new String[qualityOptions.size()];
+        for (int i = 0; i < qualityOptions.size(); i++) {
+            labels[i] = qualityOptions.get(i).label;
         }
         return labels;
     }
@@ -359,6 +490,16 @@ public class SettingsActivity extends AppCompatActivity {
         final String value;
 
         PlatformItem(String label, String value) {
+            this.label = label;
+            this.value = value;
+        }
+    }
+
+    private static class QualityItem {
+        final String label;
+        final String value;
+
+        QualityItem(String label, String value) {
             this.label = label;
             this.value = value;
         }
