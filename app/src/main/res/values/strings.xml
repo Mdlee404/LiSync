@@ -28,6 +28,7 @@
     <string name="action_clear_logs">清理</string>
 
     <string name="result_placeholder">等待响应...</string>
+    <string name="result_empty">无有效 URL</string>
     <string name="no_logs">暂无系统日志</string>
     <string name="placeholder_number">0</string>
 

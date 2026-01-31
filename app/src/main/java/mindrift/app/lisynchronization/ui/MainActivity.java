@@ -2,6 +2,8 @@ package mindrift.app.lisynchronization.ui;
 
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
 import android.widget.ArrayAdapter;
@@ -15,6 +17,9 @@ import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.io.InputStream;
 import java.text.DateFormat;
 import java.util.Date;
@@ -49,6 +54,8 @@ public class MainActivity extends AppCompatActivity {
     private final java.util.List<ActionItem> actionOptions = new java.util.ArrayList<>();
     private final java.util.List<PlatformItem> platformOptions = new java.util.ArrayList<>();
     private final com.google.gson.Gson gson = new com.google.gson.Gson();
+    private final com.google.gson.Gson prettyGson = new com.google.gson.GsonBuilder().setPrettyPrinting().create();
+    private String lastResolvedUrl;
     private ActivityResultLauncher<String[]> importLauncher;
     private final AppLogBuffer.LogListener logListener = newLine -> runOnUiThread(this::refreshLogView);
 
@@ -106,6 +113,7 @@ public class MainActivity extends AppCompatActivity {
             AppLogBuffer.clear();
             refreshLogView();
         });
+        testResultText.setOnClickListener(v -> openResolvedUrl());
 
         setupDropdowns();
         AppLogBuffer.addListener(logListener);
@@ -267,7 +275,11 @@ public class MainActivity extends AppCompatActivity {
                 musicInfo.hash = songId;
                 request.setMusicInfo(musicInfo);
                 String response = requestProxy.resolveSync(request);
-                runOnUiThread(() -> testResultText.setText(response));
+                String url = extractUrl(response);
+                runOnUiThread(() -> {
+                    lastResolvedUrl = url;
+                    testResultText.setText(url == null ? getString(R.string.result_empty) : url);
+                });
             } catch (Exception e) {
                 runOnUiThread(() -> testResultText.setText(getString(R.string.request_failed, e.getMessage())));
             }
@@ -285,6 +297,55 @@ public class MainActivity extends AppCompatActivity {
         ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
         if (clipboard != null) {
             clipboard.setPrimaryClip(ClipData.newPlainText(getString(R.string.clipboard_label), snapshot));
+        }
+    }
+
+    private String extractUrl(String response) {
+        if (response == null || response.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            JsonElement element = JsonParser.parseString(response);
+            if (!element.isJsonObject()) {
+                return extractPlainUrl(response);
+            }
+            JsonObject obj = element.getAsJsonObject();
+            if (obj.has("url") && obj.get("url").isJsonPrimitive()) {
+                return obj.get("url").getAsString();
+            }
+            if (obj.has("data")) {
+                JsonElement data = obj.get("data");
+                if (data != null && data.isJsonObject()) {
+                    JsonObject dataObj = data.getAsJsonObject();
+                    if (dataObj.has("url") && dataObj.get("url").isJsonPrimitive()) {
+                        return dataObj.get("url").getAsString();
+                    }
+                }
+                if (data != null && data.isJsonPrimitive()) {
+                    return extractPlainUrl(data.getAsString());
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            return extractPlainUrl(response);
+        }
+    }
+
+    private String extractPlainUrl(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+            return trimmed;
+        }
+        return null;
+    }
+
+    private void openResolvedUrl() {
+        if (lastResolvedUrl == null || lastResolvedUrl.isEmpty()) return;
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(lastResolvedUrl));
+            startActivity(intent);
+        } catch (Exception ignored) {
         }
     }
 

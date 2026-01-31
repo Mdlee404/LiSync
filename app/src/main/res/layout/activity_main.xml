@@ -295,6 +295,16 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:text="@string/action_test_request" />
+
+                    <TextView
+                        android:id="@+id/text_test_result"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/result_placeholder"
+                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textColor="?attr/colorOnSurface"
+                        android:fontFamily="monospace" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -345,16 +355,6 @@
                             android:padding="8dp"
                             android:background="?attr/selectableItemBackground" />
                     </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/text_test_result"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/result_placeholder"
-                        android:textAppearance="?attr/textAppearanceBodySmall"
-                        android:textColor="?attr/colorOnSurface"
-                        android:layout_marginBottom="8dp"
-                        android:fontFamily="monospace"/>
 
                     <HorizontalScrollView
                         android:layout_width="match_parent"
