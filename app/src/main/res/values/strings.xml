@@ -57,6 +57,11 @@
     <string name="script_capabilities_placeholder">支持平台/音质：请选择脚本</string>
     <string name="script_capabilities_empty">未读取到脚本能力信息</string>
     <string name="script_capabilities_any_quality">不限</string>
+
+    <string name="agreement_title">用户协议</string>
+    <string name="agreement_accept">同意并继续</string>
+    <string name="agreement_decline">不同意</string>
+    <string name="agreement_content_placeholder">请在此处填写用户协议内容。你稍后可以替换为正式文案。</string>
     <string name="no_logs">暂无系统日志</string>
     <string name="placeholder_number">0</string>
 
