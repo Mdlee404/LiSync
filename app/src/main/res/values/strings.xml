@@ -9,7 +9,7 @@
     <string name="action_refresh">刷新</string>
     <string name="action_clear_cache">清理</string>
 
-    <string name="section_console">控制台</string>
+    <string name="section_console">音源管理</string>
     <string name="action_import_file">文件</string>
     <string name="action_import_url">链接</string>
     <string name="action_reload_scripts">重载配置</string>
@@ -22,6 +22,10 @@
     <string name="hint_quality">音质</string>
     <string name="default_quality">128k</string>
     <string name="action_test_request">发起调试</string>
+    <string name="action_open_settings">设置</string>
+    <string name="action_edit_script">编辑</string>
+    <string name="action_rename_script">重命名</string>
+    <string name="action_delete_script">删除</string>
 
     <string name="terminal_title">日志</string>
     <string name="action_copy_logs">复制</string>
@@ -29,6 +33,27 @@
 
     <string name="result_placeholder">等待响应...</string>
     <string name="result_empty">无有效 URL</string>
+
+    <string name="settings_title">设置</string>
+    <string name="section_cache">缓存</string>
+    <string name="cache_summary_placeholder">缓存条目: 0</string>
+    <string name="cache_summary">缓存条目: %1$d</string>
+    <string name="action_refresh_cache">刷新缓存</string>
+    <string name="cache_empty">暂无缓存</string>
+    <string name="cache_provider_format">脚本: %1$s</string>
+    <string name="cache_ttl_format">剩余: %1$s</string>
+    <string name="cache_data_format">数据: %1$s</string>
+
+    <string name="script_manage_title">脚本管理</string>
+    <string name="script_rename_title">重命名脚本</string>
+    <string name="script_edit_title">编辑脚本</string>
+    <string name="script_delete_confirm">确定删除脚本 %1$s ?</string>
+    <string name="script_name_hint">脚本文件名</string>
+    <string name="script_content_hint">脚本内容</string>
+    <string name="action_save">保存</string>
+    <string name="action_delete">删除</string>
+    <string name="script_op_failed">操作失败</string>
+    <string name="script_op_success">操作成功</string>
     <string name="no_logs">暂无系统日志</string>
     <string name="placeholder_number">0</string>
 

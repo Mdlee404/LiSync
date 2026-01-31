@@ -69,6 +69,46 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
         return listScriptFilesInternal();
     }
 
+    public String readScriptContent(String scriptId) {
+        if (scriptId == null || scriptId.trim().isEmpty()) return null;
+        File file = new File(scriptsDir, scriptId);
+        if (!file.exists()) return null;
+        return readFile(file);
+    }
+
+    public boolean updateScriptContent(String scriptId, String content) {
+        if (scriptId == null || scriptId.trim().isEmpty()) return false;
+        File file = new File(scriptsDir, scriptId);
+        if (!file.exists()) return false;
+        try (FileOutputStream output = new FileOutputStream(file, false)) {
+            byte[] data = content == null ? new byte[0] : content.getBytes(StandardCharsets.UTF_8);
+            output.write(data);
+            return true;
+        } catch (Exception e) {
+            Logger.error("Failed to write script: " + scriptId, e);
+            return false;
+        }
+    }
+
+    public String renameScript(String scriptId, String newName) {
+        if (scriptId == null || scriptId.trim().isEmpty()) return null;
+        if (newName == null || newName.trim().isEmpty()) return null;
+        String safeName = sanitizeFileName(newName);
+        if (!safeName.toLowerCase().endsWith(".js")) {
+            safeName = safeName + ".js";
+        }
+        if (safeName.equals(scriptId)) return scriptId;
+        File source = new File(scriptsDir, scriptId);
+        File target = new File(scriptsDir, safeName);
+        if (!source.exists() || target.exists()) {
+            return null;
+        }
+        if (source.renameTo(target)) {
+            return safeName;
+        }
+        return null;
+    }
+
     public boolean deleteScript(String scriptId) {
         ScriptContext context = scripts.remove(scriptId);
         if (context != null) {

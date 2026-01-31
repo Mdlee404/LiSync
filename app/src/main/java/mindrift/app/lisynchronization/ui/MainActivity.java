@@ -1,14 +1,11 @@
 package mindrift.app.lisynchronization.ui;
 
-import android.content.ClipData;
-import android.content.ClipboardManager;
-import android.content.Intent;
-import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
 import android.widget.TextView;
+import android.widget.Toast;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
@@ -17,9 +14,6 @@ import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import java.io.InputStream;
 import java.text.DateFormat;
 import java.util.Date;
@@ -30,34 +24,18 @@ import mindrift.app.lisynchronization.App;
 import mindrift.app.lisynchronization.R;
 import mindrift.app.lisynchronization.core.cache.CacheEntry;
 import mindrift.app.lisynchronization.core.cache.CacheManager;
-import mindrift.app.lisynchronization.core.proxy.RequestProxy;
 import mindrift.app.lisynchronization.core.script.ScriptManager;
-import mindrift.app.lisynchronization.model.ResolveRequest;
-import mindrift.app.lisynchronization.utils.AppLogBuffer;
 
 public class MainActivity extends AppCompatActivity {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private CacheManager cacheManager;
     private ScriptManager scriptManager;
-    private RequestProxy requestProxy;
     private TextView scriptCountText;
     private TextView cacheCountText;
     private TextView lastUpdatedText;
-    private TextView testResultText;
-    private TextView logOutputText;
     private AutoCompleteTextView scriptDropdown;
-    private AutoCompleteTextView platformDropdown;
-    private AutoCompleteTextView actionDropdown;
-    private TextInputEditText songIdInput;
-    private TextInputEditText qualityInput;
     private final java.util.List<String> scriptOptions = new java.util.ArrayList<>();
-    private final java.util.List<ActionItem> actionOptions = new java.util.ArrayList<>();
-    private final java.util.List<PlatformItem> platformOptions = new java.util.ArrayList<>();
-    private final com.google.gson.Gson gson = new com.google.gson.Gson();
-    private final com.google.gson.Gson prettyGson = new com.google.gson.GsonBuilder().setPrettyPrinting().create();
-    private String lastResolvedUrl;
     private ActivityResultLauncher<String[]> importLauncher;
-    private final AppLogBuffer.LogListener logListener = newLine -> runOnUiThread(this::refreshLogView);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -67,27 +45,21 @@ public class MainActivity extends AppCompatActivity {
         App app = (App) getApplication();
         cacheManager = app.getCacheManager();
         scriptManager = app.getScriptManager();
-        requestProxy = app.getRequestProxy();
 
         scriptCountText = findViewById(R.id.text_script_count);
         cacheCountText = findViewById(R.id.text_cache_count);
         lastUpdatedText = findViewById(R.id.text_last_updated);
-        testResultText = findViewById(R.id.text_test_result);
-        logOutputText = findViewById(R.id.text_log_output);
-        scriptDropdown = findViewById(R.id.dropdown_script);
-        platformDropdown = findViewById(R.id.dropdown_platform);
-        actionDropdown = findViewById(R.id.dropdown_action);
-        songIdInput = findViewById(R.id.input_song_id);
-        qualityInput = findViewById(R.id.input_quality);
+        scriptDropdown = findViewById(R.id.dropdown_script_home);
 
         MaterialButton refreshButton = findViewById(R.id.button_refresh);
         MaterialButton clearCacheButton = findViewById(R.id.button_clear_cache);
         MaterialButton importFileButton = findViewById(R.id.button_import_file);
         MaterialButton importUrlButton = findViewById(R.id.button_import_url);
         MaterialButton reloadScriptsButton = findViewById(R.id.button_reload_scripts);
-        MaterialButton testButton = findViewById(R.id.button_test_request);
-        TextView copyLogsButton = findViewById(R.id.button_copy_logs);
-        TextView clearLogsButton = findViewById(R.id.button_clear_logs);
+        MaterialButton editScriptButton = findViewById(R.id.button_script_edit_home);
+        MaterialButton renameScriptButton = findViewById(R.id.button_script_rename_home);
+        MaterialButton deleteScriptButton = findViewById(R.id.button_script_delete_home);
+        MaterialButton openSettingsButton = findViewById(R.id.button_open_settings);
 
         refreshButton.setOnClickListener(v -> refreshData());
         clearCacheButton.setOnClickListener(v -> {
@@ -107,24 +79,17 @@ public class MainActivity extends AppCompatActivity {
                 "text/plain"
         }));
         importUrlButton.setOnClickListener(v -> showImportUrlDialog());
-        testButton.setOnClickListener(v -> runTestRequest());
-        copyLogsButton.setOnClickListener(v -> copyLogs());
-        clearLogsButton.setOnClickListener(v -> {
-            AppLogBuffer.clear();
-            refreshLogView();
-        });
-        testResultText.setOnClickListener(v -> openResolvedUrl());
+        editScriptButton.setOnClickListener(v -> showEditScriptDialog());
+        renameScriptButton.setOnClickListener(v -> showRenameScriptDialog());
+        deleteScriptButton.setOnClickListener(v -> confirmDeleteScript());
+        openSettingsButton.setOnClickListener(v -> startActivity(new android.content.Intent(this, SettingsActivity.class)));
 
-        setupDropdowns();
-        AppLogBuffer.addListener(logListener);
-        refreshLogView();
         refreshData();
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        AppLogBuffer.removeListener(logListener);
         executor.shutdown();
     }
 
@@ -165,8 +130,8 @@ public class MainActivity extends AppCompatActivity {
     private void showImportUrlDialog() {
         TextInputLayout inputLayout = new TextInputLayout(this);
         inputLayout.setBoxBackgroundMode(TextInputLayout.BOX_BACKGROUND_OUTLINE);
-        inputLayout.setPadding(32, 16, 32, 0); // Add padding
-        
+        inputLayout.setPadding(32, 16, 32, 0);
+
         TextInputEditText editText = new TextInputEditText(this);
         editText.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
         editText.setHint(getString(R.string.import_script_url_placeholder));
@@ -196,38 +161,6 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
-    private void setupDropdowns() {
-        actionOptions.clear();
-        actionOptions.add(new ActionItem(getString(R.string.action_music_url), "musicUrl"));
-        actionOptions.add(new ActionItem(getString(R.string.action_lyric), "lyric"));
-        actionOptions.add(new ActionItem(getString(R.string.action_pic), "pic"));
-
-        platformOptions.clear();
-        platformOptions.add(new PlatformItem(getString(R.string.platform_tx), "tx"));
-        platformOptions.add(new PlatformItem(getString(R.string.platform_wy), "wy"));
-        platformOptions.add(new PlatformItem(getString(R.string.platform_kg), "kg"));
-        platformOptions.add(new PlatformItem(getString(R.string.platform_kw), "kw"));
-        platformOptions.add(new PlatformItem(getString(R.string.platform_mg), "mg"));
-
-        ArrayAdapter<String> actionAdapter = new ArrayAdapter<>(this,
-                android.R.layout.simple_list_item_1,
-                mapActionLabels());
-        actionDropdown.setAdapter(actionAdapter);
-        if (!actionOptions.isEmpty()) {
-            actionDropdown.setText(actionOptions.get(0).label, false);
-        }
-
-        ArrayAdapter<String> platformAdapter = new ArrayAdapter<>(this,
-                android.R.layout.simple_list_item_1,
-                mapPlatformLabels());
-        platformDropdown.setAdapter(platformAdapter);
-        if (!platformOptions.isEmpty()) {
-            platformDropdown.setText(platformOptions.get(0).label, false);
-        }
-
-        updateScriptDropdown(scriptManager.getLoadedScriptIds());
-    }
-
     private void updateScriptDropdown(List<String> scriptIds) {
         scriptOptions.clear();
         if (scriptIds != null) {
@@ -243,169 +176,115 @@ public class MainActivity extends AppCompatActivity {
         scriptDropdown.setText(scriptOptions.get(0), false);
     }
 
-    private void runTestRequest() {
+    private String getSelectedScriptId() {
         String scriptLabel = scriptDropdown.getText() == null ? "" : scriptDropdown.getText().toString();
-        String platformLabel = platformDropdown.getText() == null ? "" : platformDropdown.getText().toString();
-        String actionLabel = actionDropdown.getText() == null ? "" : actionDropdown.getText().toString();
-        String songId = songIdInput.getText() == null ? "" : songIdInput.getText().toString().trim();
-        String quality = qualityInput.getText() == null ? "" : qualityInput.getText().toString().trim();
-
-        if (getString(R.string.no_scripts).equals(scriptLabel) || scriptLabel.isEmpty()) {
-            testResultText.setText(getString(R.string.prompt_import_first));
-            return;
+        if (scriptLabel.isEmpty() || getString(R.string.no_scripts).equals(scriptLabel)) {
+            Toast.makeText(this, getString(R.string.prompt_import_first), Toast.LENGTH_SHORT).show();
+            return null;
         }
-        if (songId.isEmpty()) {
-            testResultText.setText(getString(R.string.prompt_input_song_id));
-            return;
-        }
-        String scriptId = scriptLabel;
-        String platform = resolvePlatformValue(platformLabel);
-        String action = resolveActionValue(actionLabel);
+        return scriptLabel;
+    }
 
-        testResultText.setText(getString(R.string.request_in_progress));
+    private void showRenameScriptDialog() {
+        String scriptId = getSelectedScriptId();
+        if (scriptId == null) return;
+        TextInputLayout inputLayout = new TextInputLayout(this);
+        inputLayout.setBoxBackgroundMode(TextInputLayout.BOX_BACKGROUND_OUTLINE);
+        inputLayout.setPadding(32, 16, 32, 0);
+
+        TextInputEditText editText = new TextInputEditText(this);
+        editText.setInputType(InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        editText.setHint(getString(R.string.script_name_hint));
+        editText.setText(scriptId);
+        inputLayout.addView(editText);
+
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(getString(R.string.script_rename_title))
+                .setView(inputLayout)
+                .setPositiveButton(getString(R.string.action_save), (dialog, which) -> {
+                    String newName = editText.getText() == null ? "" : editText.getText().toString().trim();
+                    executor.execute(() -> {
+                        String renamed = scriptManager.renameScript(scriptId, newName);
+                        if (renamed != null) {
+                            scriptManager.loadScripts();
+                            runOnUiThread(() -> {
+                                refreshData();
+                                scriptDropdown.setText(renamed, false);
+                                Toast.makeText(this, getString(R.string.script_op_success), Toast.LENGTH_SHORT).show();
+                            });
+                        } else {
+                            runOnUiThread(() -> Toast.makeText(this, getString(R.string.script_op_failed), Toast.LENGTH_SHORT).show());
+                        }
+                    });
+                })
+                .setNegativeButton(getString(R.string.cancel_button), null)
+                .show();
+    }
+
+    private void showEditScriptDialog() {
+        String scriptId = getSelectedScriptId();
+        if (scriptId == null) return;
         executor.execute(() -> {
-            try {
-                ResolveRequest request = new ResolveRequest();
-                request.setSource(platform);
-                request.setAction(action);
-                request.setQuality(quality.isEmpty() ? "128k" : quality);
-                request.setTargetScriptId(scriptId);
-                ResolveRequest.MusicInfo musicInfo = new ResolveRequest.MusicInfo();
-                musicInfo.songmid = songId;
-                musicInfo.hash = songId;
-                request.setMusicInfo(musicInfo);
-                String response = requestProxy.resolveSync(request);
-                String url = extractUrl(response);
-                runOnUiThread(() -> {
-                    lastResolvedUrl = url;
-                    testResultText.setText(url == null ? getString(R.string.result_empty) : url);
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> testResultText.setText(getString(R.string.request_failed, e.getMessage())));
-            }
+            String content = scriptManager.readScriptContent(scriptId);
+            runOnUiThread(() -> openEditDialog(scriptId, content));
         });
     }
 
-    private void refreshLogView() {
-        if (logOutputText == null) return;
-        String snapshot = AppLogBuffer.getSnapshot();
-        logOutputText.setText(snapshot.isEmpty() ? getString(R.string.no_logs) : snapshot);
+    private void openEditDialog(String scriptId, String content) {
+        TextInputLayout inputLayout = new TextInputLayout(this);
+        inputLayout.setBoxBackgroundMode(TextInputLayout.BOX_BACKGROUND_OUTLINE);
+        inputLayout.setPadding(32, 16, 32, 0);
+
+        TextInputEditText editText = new TextInputEditText(this);
+        editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        editText.setMinLines(10);
+        editText.setHint(getString(R.string.script_content_hint));
+        editText.setText(content == null ? "" : content);
+        inputLayout.addView(editText);
+
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(getString(R.string.script_edit_title))
+                .setView(inputLayout)
+                .setPositiveButton(getString(R.string.action_save), (dialog, which) -> {
+                    String newContent = editText.getText() == null ? "" : editText.getText().toString();
+                    executor.execute(() -> {
+                        boolean ok = scriptManager.updateScriptContent(scriptId, newContent);
+                        if (ok) {
+                            scriptManager.loadScripts();
+                            runOnUiThread(() -> {
+                                refreshData();
+                                Toast.makeText(this, getString(R.string.script_op_success), Toast.LENGTH_SHORT).show();
+                            });
+                        } else {
+                            runOnUiThread(() -> Toast.makeText(this, getString(R.string.script_op_failed), Toast.LENGTH_SHORT).show());
+                        }
+                    });
+                })
+                .setNegativeButton(getString(R.string.cancel_button), null)
+                .show();
     }
 
-    private void copyLogs() {
-        String snapshot = AppLogBuffer.getSnapshot();
-        ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-        if (clipboard != null) {
-            clipboard.setPrimaryClip(ClipData.newPlainText(getString(R.string.clipboard_label), snapshot));
-        }
-    }
-
-    private String extractUrl(String response) {
-        if (response == null || response.trim().isEmpty()) {
-            return null;
-        }
-        try {
-            JsonElement element = JsonParser.parseString(response);
-            if (!element.isJsonObject()) {
-                return extractPlainUrl(response);
-            }
-            JsonObject obj = element.getAsJsonObject();
-            if (obj.has("url") && obj.get("url").isJsonPrimitive()) {
-                return obj.get("url").getAsString();
-            }
-            if (obj.has("data")) {
-                JsonElement data = obj.get("data");
-                if (data != null && data.isJsonObject()) {
-                    JsonObject dataObj = data.getAsJsonObject();
-                    if (dataObj.has("url") && dataObj.get("url").isJsonPrimitive()) {
-                        return dataObj.get("url").getAsString();
-                    }
-                }
-                if (data != null && data.isJsonPrimitive()) {
-                    return extractPlainUrl(data.getAsString());
-                }
-            }
-            return null;
-        } catch (Exception e) {
-            return extractPlainUrl(response);
-        }
-    }
-
-    private String extractPlainUrl(String value) {
-        if (value == null) return null;
-        String trimmed = value.trim();
-        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-            return trimmed;
-        }
-        return null;
-    }
-
-    private void openResolvedUrl() {
-        if (lastResolvedUrl == null || lastResolvedUrl.isEmpty()) return;
-        try {
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(lastResolvedUrl));
-            startActivity(intent);
-        } catch (Exception ignored) {
-        }
-    }
-
-    private String resolvePlatformValue(String label) {
-        for (PlatformItem item : platformOptions) {
-            if (item.label.equals(label)) {
-                return item.value;
-            }
-        }
-        return label;
-    }
-
-    private String resolveActionValue(String label) {
-        for (ActionItem item : actionOptions) {
-            if (item.label.equals(label)) {
-                return item.value;
-            }
-        }
-        return label;
-    }
-
-    private String[] mapActionLabels() {
-        String[] labels = new String[actionOptions.size()];
-        for (int i = 0; i < actionOptions.size(); i++) {
-            labels[i] = actionOptions.get(i).label;
-        }
-        return labels;
-    }
-
-    private String[] mapPlatformLabels() {
-        String[] labels = new String[platformOptions.size()];
-        for (int i = 0; i < platformOptions.size(); i++) {
-            labels[i] = platformOptions.get(i).label;
-        }
-        return labels;
-    }
-
-    private static class ActionItem {
-        final String label;
-        final String value;
-
-        ActionItem(String label, String value) {
-            this.label = label;
-            this.value = value;
-        }
-    }
-
-    private static class PlatformItem {
-        final String label;
-        final String value;
-
-        PlatformItem(String label, String value) {
-            this.label = label;
-            this.value = value;
-        }
+    private void confirmDeleteScript() {
+        String scriptId = getSelectedScriptId();
+        if (scriptId == null) return;
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(getString(R.string.action_delete_script))
+                .setMessage(getString(R.string.script_delete_confirm, scriptId))
+                .setPositiveButton(getString(R.string.action_delete), (dialog, which) -> {
+                    executor.execute(() -> {
+                        boolean ok = scriptManager.deleteScript(scriptId);
+                        if (ok) {
+                            scriptManager.loadScripts();
+                            runOnUiThread(() -> {
+                                refreshData();
+                                Toast.makeText(this, getString(R.string.script_op_success), Toast.LENGTH_SHORT).show();
+                            });
+                        } else {
+                            runOnUiThread(() -> Toast.makeText(this, getString(R.string.script_op_failed), Toast.LENGTH_SHORT).show());
+                        }
+                    });
+                })
+                .setNegativeButton(getString(R.string.cancel_button), null)
+                .show();
     }
 }
-
-
-
-
-
-
