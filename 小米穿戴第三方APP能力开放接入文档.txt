@@ -1,0 +1,19 @@
+接⼊⽂档  
+1.拷⻉ libs ⽬录中的 aar ⽂件到主⼯程中的 libs ⽬录
+2.修改主⼯程的 dependencies 配置，使其⽀持 aar 依赖：
+ 
+设备操作相关说明  
+1.通过小⽶穿戴 App 连接⼿表  
+安装 demo ⾥⾯配套的 android-wearable-ap p-***.apk ，  登录后打开我的 tab ，点击右上⻆ + 号选择
+添加新设备，然后选择小⽶⼿表 color2 来添加 
+2. 固件本地升级  
+请在设备连接成功后，点击我的 tab, 滑动到底部选择 SD 本地版本更新从 OTA ⽬录选择，然后选择已经放
+在⼿机存储⾥⾯的固件⽂件，进⼊下载更新⻚⾯后点击底部的下载升级包来升级 
+3.安装⼿表端应⽤  
+点击我的 tab, 滑动到底部选择设备⼯⼚设置 -ThirdAppDemo 点击 click to input package name 输⼊
+包名，然后选择 install third app 选择 rpk ⽂件安装，安装成功会有 toast 提⽰ 
+4.卸载⼿表端应⽤  
+同第三步，最后选择 uninstall third app  
+5.修改权限  
+第三⽅应⽤有过申请权限的操作后，在 app 设置 - 设备授权管理⻚⾯修改权限  
+ implementation fileTree(dir: "libs", include: ["*.jar", "*.aar"])

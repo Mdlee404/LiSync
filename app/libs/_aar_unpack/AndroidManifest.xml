@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.xiaomi.xms.wearable" >
+
+    <uses-sdk
+        android:minSdkVersion="19"
+        android:targetSdkVersion="30" />
+
+    <queries>
+        <package android:name="com.xiaomi.wearable" />
+        <package android:name="com.mi.health" />
+    </queries>
+
+</manifest>

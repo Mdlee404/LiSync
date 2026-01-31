@@ -1,0 +1,25 @@
+interconnect测试
+1.通过⼩⽶运动健康安装快应⽤com.xiaomi.xms.wearable.demo.debug.1.0.0.rpk到⼿表上。
+2.⼿机端安装安卓应⽤app-debug.apk
+准备⼯作
+1.打开安卓应⽤，进⼊后先点击COMMONDEMO
+2.进⼊后分别点击GETCONNECTEDDEVICE和GETAPPINSTALLED查看信息是否正确
+（如果提⽰错误，先执⾏第3步，再回头执⾏第2步试试）
+（正确情况：⻅下图）
+3.退出到上⼀⻚，然后点击PERMISSIONSDEMO，进⾏权限申请
+4.进⼊后依次点击按钮CHECKISPERMISSIONGRANTED和REQUESTPERMISSION即可
+正确提⽰如下：
+onmessage
+1.点击下⽅message按钮
+2.在输⼊框内输⼊内容，然后点击SENDMESSAGE，然后看⼿表测是否可以正常收到l og
+send
+1.点击REGISTERMESSAGELISTENER，下⽅提⽰成功
+2.点击⼿表上的发送信息
+结果验证
+可以看log，有对应的length信息，查看是否跟你传递的信息length⼀致
+onopen
+因为testcaseinterconnect的onReady⽣命周期⾥⾯注册了onopen回调，所以打开这个⻚⾯观察log
+即可验证（安卓应⽤也要确保开启状态）
+
+onclose
+⼿机端退出应⽤，看log即可验证

@@ -1,0 +1,61 @@
+plugins {
+    alias(libs.plugins.android.application)
+}
+
+android {
+    namespace 'mindrift.app.lisynchronization'
+    compileSdk 34
+
+
+    defaultConfig {
+        applicationId "mindrift.app.lisynchronization"
+        minSdk 28
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        javaCompileOptions {
+            annotationProcessorOptions {
+                arguments += ["room.schemaLocation": "$projectDir/schemas".toString()]
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+    implementation libs.appcompat
+    implementation libs.material
+    
+    // Core Logic Dependencies
+    implementation libs.quickjs.wrapper
+    implementation libs.okhttp
+    implementation libs.okhttp.logging
+    implementation libs.gson
+    implementation libs.lifecycle.common.java8
+    implementation libs.documentfile
+    
+    // Cache (Room for Java)
+    implementation libs.room.runtime
+    annotationProcessor libs.room.compiler
+
+    // Testing
+    testImplementation libs.junit
+    androidTestImplementation libs.ext.junit
+    androidTestImplementation libs.espresso.core
+    
+    // Xiaomi Wearable SDK
+    implementation fileTree(dir: "libs", include: ["*.jar", "*.aar"])
+}

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- M3 默认蓝紫配色方案 -->
+    <color name="color_primary">#6750A4</color>
+    <color name="color_on_primary">#FFFFFF</color>
+    <color name="color_primary_container">#EADDFF</color>
+    <color name="color_on_primary_container">#21005D</color>
+
+    <color name="color_secondary">#625B71</color>
+    <color name="color_on_secondary">#FFFFFF</color>
+    <color name="color_secondary_container">#E8DEF8</color>
+    <color name="color_on_secondary_container">#1D192B</color>
+
+    <color name="color_tertiary">#7D5260</color>
+    <color name="color_on_tertiary">#FFFFFF</color>
+    <color name="color_tertiary_container">#FFD8E4</color>
+    <color name="color_on_tertiary_container">#31111D</color>
+
+    <color name="color_error">#B3261E</color>
+    <color name="color_on_error">#FFFFFF</color>
+    <color name="color_error_container">#F9DEDC</color>
+    <color name="color_on_error_container">#410E0B</color>
+
+    <color name="color_background">#FEF7FF</color>
+    <color name="color_on_background">#1D1B20</color>
+    <color name="color_surface">#FEF7FF</color>
+    <color name="color_on_surface">#1D1B20</color>
+    <color name="color_surface_variant">#E7E0EC</color>
+    <color name="color_on_surface_variant">#49454F</color>
+    <color name="color_outline">#79747E</color>
+
+    <!-- 兼容旧代码的别名 -->
+    <color name="color_primary_variant">#21005D</color>
+</resources>

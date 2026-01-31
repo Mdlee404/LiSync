@@ -1,25 +1,26 @@
 package mindrift.app.lisynchronization.core.script;
 
-import app.cash.quickjs.QuickJs;
+import com.whl.quickjs.android.QuickJSLoader;
+import com.whl.quickjs.wrapper.QuickJSContext;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ConcurrentHashMap;
 import mindrift.app.lisynchronization.core.engine.LxNativeImpl;
-import mindrift.app.lisynchronization.core.engine.LxNativeInterface;
+import mindrift.app.lisynchronization.utils.Logger;
 
 public class ScriptContext {
     private final String scriptId;
     private final String nativeKey;
     private final ExecutorService executor;
     private final CountDownLatch initLatch;
-    private QuickJs quickJs;
+    private QuickJSContext jsContext;
     private final ConcurrentHashMap<String, ArrayBlockingQueue<String>> asyncResults = new ConcurrentHashMap<>();
 
-    // 存储脚本解析出的音源信息
+    // ????????????
     private volatile Object scriptInfo;
 
     public ScriptContext(String scriptId, String nativeKey) {
@@ -37,13 +38,20 @@ public class ScriptContext {
         return nativeKey;
     }
 
-    public void initialize(String wrapperScript, String scriptContent, LxNativeImpl nativeImpl) throws Exception {
+    public void initialize(ScriptMeta meta, String preloadScript, String scriptContent, LxNativeImpl nativeImpl) throws Exception {
         Future<?> future = executor.submit(() -> {
             try {
-                quickJs = QuickJs.create();
-                quickJs.set("LxNative", LxNativeBridge.class, new LxNativeBridgeImpl(nativeImpl));
-                quickJs.evaluate(wrapperScript);
-                quickJs.evaluate(scriptContent + "\n;void 0;");
+                QuickJSLoader.init();
+                if (jsContext != null) {
+                    jsContext.destroy();
+                }
+                jsContext = QuickJSContext.create();
+                createEnvObj(jsContext, nativeImpl);
+                if (preloadScript != null && !preloadScript.isEmpty()) {
+                    jsContext.evaluate(preloadScript);
+                }
+                callSetup(meta, scriptContent);
+                jsContext.evaluate(scriptContent + "\n;void 0;");
             } finally {
                 initLatch.countDown();
             }
@@ -54,14 +62,20 @@ public class ScriptContext {
     public void evaluateAsync(String script) {
         executor.submit(() -> {
             awaitInit();
-            quickJs.evaluate(script);
+            try {
+                if (jsContext != null) {
+                    jsContext.evaluate(script);
+                }
+            } catch (Exception e) {
+                Logger.error("Script execution error: " + e.getMessage(), e);
+            }
         });
     }
 
     public <T> T evaluate(String script, Class<T> type) throws Exception {
         Future<T> future = executor.submit(() -> {
             awaitInit();
-            Object result = quickJs.evaluate(script);
+            Object result = jsContext == null ? null : jsContext.evaluate(script);
             if (type == String.class) {
                 return type.cast(result == null ? null : String.valueOf(result));
             }
@@ -81,24 +95,41 @@ public class ScriptContext {
     public void close() {
         executor.submit(() -> {
             awaitInit();
-            if (quickJs != null) {
-                quickJs.close();
+            if (jsContext != null) {
+                jsContext.destroy();
+                jsContext = null;
             }
         });
+        asyncResults.clear();
         executor.shutdown();
     }
 
     public void completeAsyncResult(String asyncId, String payloadJson) {
         if (asyncId == null) return;
-        ArrayBlockingQueue<String> queue = asyncResults.computeIfAbsent(asyncId, k -> new ArrayBlockingQueue<>(1));
-        queue.offer(payloadJson == null ? "" : payloadJson);
+        ArrayBlockingQueue<String> queue = asyncResults.get(asyncId);
+        if (queue == null) {
+            Logger.warn("Async result ignored (not pending): " + asyncId);
+            return;
+        }
+        boolean offered = queue.offer(payloadJson == null ? "" : payloadJson);
+        if (!offered) {
+            Logger.warn("Async result ignored (already completed): " + asyncId);
+        }
+    }
+
+    public void prepareAsyncResult(String asyncId) {
+        if (asyncId == null) return;
+        asyncResults.putIfAbsent(asyncId, new ArrayBlockingQueue<>(1));
     }
 
     public String awaitAsyncResult(String asyncId, long timeoutMs) throws Exception {
         if (asyncId == null) {
             throw new Exception("Async id missing");
         }
-        ArrayBlockingQueue<String> queue = asyncResults.computeIfAbsent(asyncId, k -> new ArrayBlockingQueue<>(1));
+        ArrayBlockingQueue<String> queue = asyncResults.get(asyncId);
+        if (queue == null) {
+            throw new Exception("Async task not prepared");
+        }
         try {
             String payload = queue.poll(timeoutMs, TimeUnit.MILLISECONDS);
             if (payload == null) {
@@ -110,142 +141,65 @@ public class ScriptContext {
             asyncResults.remove(asyncId);
         }
     }
-    private interface LxNativeBridge {
-        String nativeCall(String key, String action, String dataJson);
-        void setTimeout(double id, double timeoutMs);
-        void on(String eventName, String handlerJson);
-        void send(String eventName, String dataJson);
-        void request(String url, String optionsJson, String callbackId);
-        String requestSync(String url, String optionsJson);
-        void asyncResult(String asyncId, String payloadJson);
-        String utilsStr2b64(String input);
-        String utilsB642buf(String input);
-        String utilsStr2md5(String input);
-        String utilsAesEncrypt(String data, String key, String iv, String mode);
-        String utilsRsaEncrypt(String data, String key, String padding);
-        String md5(String input);
-        String aesEncrypt(String input, String mode, String key, String iv);
-        String rsaEncrypt(String input, String key);
-        String randomBytes(double size);
-        String bufferFrom(String data, String encoding);
-        String bufferToString(String buffer, String encoding);
-        void log(String level, String messageJson);
-        String zlibInflate(String input);
-        String zlibDeflate(String input);
+    private void createEnvObj(QuickJSContext context, LxNativeImpl nativeImpl) {
+        context.getGlobalObject().setProperty("__lx_native_call__", args -> {
+            if (args == null || args.length < 3) return null;
+            return nativeImpl.nativeCall(String.valueOf(args[0]), String.valueOf(args[1]), args[2] == null ? null : String.valueOf(args[2]));
+        });
+        context.getGlobalObject().setProperty("__lx_native_call__utils_str2b64", args -> {
+            return nativeImpl.utilsStr2b64(args == null || args.length == 0 ? null : String.valueOf(args[0]));
+        });
+        context.getGlobalObject().setProperty("__lx_native_call__utils_b642buf", args -> {
+            return nativeImpl.utilsB642buf(args == null || args.length == 0 ? null : String.valueOf(args[0]));
+        });
+        context.getGlobalObject().setProperty("__lx_native_call__utils_str2md5", args -> {
+            return nativeImpl.utilsStr2md5(args == null || args.length == 0 ? null : String.valueOf(args[0]));
+        });
+        context.getGlobalObject().setProperty("__lx_native_call__utils_aes_encrypt", args -> {
+            String data = args == null || args.length < 1 ? null : String.valueOf(args[0]);
+            String key = args == null || args.length < 2 ? null : String.valueOf(args[1]);
+            String iv = args == null || args.length < 3 ? null : String.valueOf(args[2]);
+            String mode = args == null || args.length < 4 ? null : String.valueOf(args[3]);
+            return nativeImpl.utilsAesEncrypt(data, key, iv, mode);
+        });
+        context.getGlobalObject().setProperty("__lx_native_call__utils_rsa_encrypt", args -> {
+            String data = args == null || args.length < 1 ? null : String.valueOf(args[0]);
+            String key = args == null || args.length < 2 ? null : String.valueOf(args[1]);
+            String padding = args == null || args.length < 3 ? null : String.valueOf(args[2]);
+            return nativeImpl.utilsRsaEncrypt(data, key, padding);
+        });
+        context.getGlobalObject().setProperty("__lx_native_call__set_timeout", args -> {
+            if (args == null || args.length < 2) return null;
+            double id = args[0] instanceof Number ? ((Number) args[0]).doubleValue() : Double.parseDouble(String.valueOf(args[0]));
+            double timeout = args[1] instanceof Number ? ((Number) args[1]).doubleValue() : Double.parseDouble(String.valueOf(args[1]));
+            nativeImpl.setTimeout(id, timeout);
+            return null;
+        });
+        context.getGlobalObject().setProperty("__lx_native_log__", args -> {
+            String level = args == null || args.length < 1 ? "info" : String.valueOf(args[0]);
+            String message = args == null || args.length < 2 ? "" : String.valueOf(args[1]);
+            nativeImpl.log(level, message);
+            return null;
+        });
+        context.evaluate("globalThis.console = {"
+                + "log: function(){ return __lx_native_log__('info', JSON.stringify(Array.prototype.slice.call(arguments))); },"
+                + "error: function(){ return __lx_native_log__('error', JSON.stringify(Array.prototype.slice.call(arguments))); },"
+                + "warn: function(){ return __lx_native_log__('warn', JSON.stringify(Array.prototype.slice.call(arguments))); },"
+                + "info: function(){ return __lx_native_log__('info', JSON.stringify(Array.prototype.slice.call(arguments))); },"
+                + "debug: function(){ return __lx_native_log__('debug', JSON.stringify(Array.prototype.slice.call(arguments))); },"
+                + "group: function(){}, groupEnd: function(){}"
+                + "};");
     }
 
-    private static class LxNativeBridgeImpl implements LxNativeBridge {
-        private final LxNativeInterface nativeImpl;
-
-        private LxNativeBridgeImpl(LxNativeInterface nativeImpl) {
-            this.nativeImpl = nativeImpl;
-        }
-
-        @Override
-        public String nativeCall(String key, String action, String dataJson) {
-            return nativeImpl.nativeCall(key, action, dataJson);
-        }
-
-        @Override
-        public void setTimeout(double id, double timeoutMs) {
-            nativeImpl.setTimeout(id, timeoutMs);
-        }
-
-        @Override
-        public void on(String eventName, String handlerJson) {
-            nativeImpl.on(eventName, handlerJson);
-        }
-
-        @Override
-        public void send(String eventName, String dataJson) {
-            nativeImpl.send(eventName, dataJson);
-        }
-
-        @Override
-        public void request(String url, String optionsJson, String callbackId) {
-            nativeImpl.request(url, optionsJson, callbackId);
-        }
-
-        @Override
-        public String requestSync(String url, String optionsJson) {
-            return nativeImpl.requestSync(url, optionsJson);
-        }
-
-        @Override
-        public void asyncResult(String asyncId, String payloadJson) {
-            nativeImpl.asyncResult(asyncId, payloadJson);
-        }
-
-        @Override
-        public String utilsStr2b64(String input) {
-            return nativeImpl.utilsStr2b64(input);
-        }
-
-        @Override
-        public String utilsB642buf(String input) {
-            return nativeImpl.utilsB642buf(input);
-        }
-
-        @Override
-        public String utilsStr2md5(String input) {
-            return nativeImpl.utilsStr2md5(input);
-        }
-
-        @Override
-        public String utilsAesEncrypt(String data, String key, String iv, String mode) {
-            return nativeImpl.utilsAesEncrypt(data, key, iv, mode);
-        }
-
-        @Override
-        public String utilsRsaEncrypt(String data, String key, String padding) {
-            return nativeImpl.utilsRsaEncrypt(data, key, padding);
-        }
-
-        @Override
-        public String md5(String input) {
-            return nativeImpl.md5(input);
-        }
-
-        @Override
-        public String aesEncrypt(String input, String mode, String key, String iv) {
-            return nativeImpl.aesEncrypt(input, mode, key, iv);
-        }
-
-        @Override
-        public String rsaEncrypt(String input, String key) {
-            return nativeImpl.rsaEncrypt(input, key);
-        }
-
-        @Override
-        public String randomBytes(double size) {
-            int intSize = (int) Math.max(0, Math.round(size));
-            return nativeImpl.randomBytes(intSize);
-        }
-
-        @Override
-        public String bufferFrom(String data, String encoding) {
-            return nativeImpl.bufferFrom(data, encoding);
-        }
-
-        @Override
-        public String bufferToString(String buffer, String encoding) {
-            return nativeImpl.bufferToString(buffer, encoding);
-        }
-
-        @Override
-        public void log(String level, String messageJson) {
-            nativeImpl.log(level, messageJson);
-        }
-
-        @Override
-        public String zlibInflate(String input) {
-            return nativeImpl.zlibInflate(input);
-        }
-
-        @Override
-        public String zlibDeflate(String input) {
-            return nativeImpl.zlibDeflate(input);
-        }
+    private void callSetup(ScriptMeta meta, String rawScript) {
+        if (jsContext == null) return;
+        String id = meta == null || meta.getId() == null ? "" : meta.getId();
+        String name = meta == null || meta.getName() == null ? "" : meta.getName();
+        String description = meta == null || meta.getDescription() == null ? "" : meta.getDescription();
+        String version = meta == null || meta.getVersion() == null ? "" : meta.getVersion();
+        String author = meta == null || meta.getAuthor() == null ? "" : meta.getAuthor();
+        String homepage = meta == null || meta.getHomepage() == null ? "" : meta.getHomepage();
+        jsContext.getGlobalObject().getJSFunction("lx_setup").call(nativeKey, id, name, description, version, author, homepage, rawScript);
     }
 
     private void awaitInit() {
@@ -256,3 +210,9 @@ public class ScriptContext {
         }
     }
 }
+
+
+
+
+
+
