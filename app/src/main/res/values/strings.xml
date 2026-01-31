@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">LiSynchronization</string>
+    <string name="app_name">LiSync</string>
     <string name="header_title">LiSync 服务端</string>
     <string name="server_active">服务已就绪</string>
 

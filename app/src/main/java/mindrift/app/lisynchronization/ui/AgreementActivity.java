@@ -148,4 +148,3 @@ public class AgreementActivity extends AppCompatActivity {
         startActivity(new Intent(this, MainActivity.class));
         finish();
     }
-}
