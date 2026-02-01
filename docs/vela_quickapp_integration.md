@@ -14,57 +14,84 @@
 
 > 说明：手机端已实现消息监听与权限申请，手表端只需按约定格式发送 JSON。
 
-## 3. 请求数据格式（手表 -> 手机）
-**JSON 示例**
+## 3. 获取支持平台/音质（手表 -> 手机）
+**请求示例**
 ```json
 {
-  "source": "tx",
-  "action": "musicUrl",
-  "quality": "128k",
-  "songid": "001X0PDf0W4lBq",
-  "nocache": false,
-  "targetScriptId": "lx-music-source-paid-1769840511495.js",
-  "musicInfo": {
-    "songmid": "001X0PDf0W4lBq",
-    "hash": "001X0PDf0W4lBq"
+  "action": "getCapabilities"
+}
+```
+
+**响应示例**
+```json
+{
+  "action": "capabilities",
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "platforms": ["tx", "wy", "kg", "kw", "mg", "local"],
+    "qualities": {
+      "tx": ["128k", "320k", "flac", "flac24bit"],
+      "wy": ["128k", "320k"],
+      "local": []
+    },
+    "actions": ["musicUrl"]
   }
 }
 ```
 
-**字段说明**
-- `source`：平台代码，取值 `tx / wy / kg / kw / mg / local`
-- `action`：操作类型，当前仅支持 `musicUrl`
-- `quality`：音质，取值 `128k / 320k / flac / flac24bit`（具体以脚本能力为准）
-- `songid`：歌曲 ID（当 `musicInfo` 为空时作为兜底）
-- `musicInfo`：音乐信息对象
-  - `songmid`：歌曲 ID
-  - `hash`：歌曲 hash
-- `nocache`：是否跳过缓存（`true` 表示强制重新请求）
-- `targetScriptId`：指定脚本 ID（可选，空表示使用轮询负载均衡）
+> 说明：`qualities` 为空数组表示“不限”。
 
-## 4. 响应数据格式（手机 -> 手表）
+## 4. 获取播放链接（手表 -> 手机）
+**请求示例**
+```json
+{
+  "platform": "tx",
+  "quality": "128k",
+  "id": "001X0PDf0W4lBq",
+  "nocache": false
+}
+```
+
+**字段说明**
+- `platform`：平台代码，取值 `tx / wy / kg / kw / mg / local`
+- `quality`：音质，取值 `128k / 320k / flac / flac24bit`（具体以脚本能力为准）
+- `id`：歌曲 ID（也支持 `songid`）
+- `nocache`：是否跳过缓存（`true` 表示强制重新请求）
+
+> 注意：**不要指定脚本**（不传 `targetScriptId`），手机端会自动选择可用音源。
+
+## 5. 响应数据格式（手机 -> 手表）
 **成功响应**
 ```json
 {
+  "code": 0,
+  "message": "ok",
   "data": "https://example.com/music.mp3",
   "url": "https://example.com/music.mp3",
-  "provider": "lx-music-source-paid-1769840511495.js"
+  "provider": "lx-music-source-paid-1769840511495.js",
+  "info": {
+    "platform": "tx",
+    "action": "musicUrl",
+    "quality": "128k",
+    "songId": "001X0PDf0W4lBq",
+    "provider": "lx-music-source-paid-1769840511495.js"
+  }
 }
 ```
-- `data`：响应数据（当前为 URL）
-- `url`：与 `data` 一致，便于兼容
-- `provider`：提供本次解析的脚本 ID
 
 **失败响应**
 ```json
 {
+  "code": -1,
+  "message": "error message",
   "error": {
     "message": "error message"
   }
 }
 ```
 
-## 5. 平台与音质约定
+## 6. 平台与音质约定
 - 平台代码：
   - `tx` 腾讯音乐
   - `wy` 网易云音乐
@@ -75,11 +102,11 @@
 - 音质：`128k / 320k / flac / flac24bit`
   - 以脚本 `sources[x].qualitys` 为准
 
-## 6. 缓存策略
+## 7. 缓存策略
 - LiSync 默认 **4 小时缓存**。
 - 请求中 `nocache = true` 可强制跳过缓存。
 
-## 7. 常见问题排查
+## 8. 常见问题排查
 1. **一直返回未连接设备**
    - 检查手表是否与手机正常连接
    - 确认小米穿戴/小米健康已登录并授权
@@ -89,15 +116,25 @@
 3. **返回错误消息**
    - 检查 `source/quality/songid` 是否符合脚本能力
 
-## 8. 最小调用示例（伪代码）
+## 9. 最小调用示例（伪代码）
 ```js
 const payload = {
-  source: 'tx',
-  action: 'musicUrl',
+  platform: 'tx',
   quality: '128k',
-  songid: '001X0PDf0W4lBq',
+  id: '001X0PDf0W4lBq',
   nocache: false,
 };
 // 通过 Vela 侧消息通道发送 UTF-8 JSON
 sendMessage(JSON.stringify(payload));
+```
+
+## 10. 平台能力更新推送（手机 -> 手表）
+当手机端音源变更时，会主动推送更新：
+```json
+{
+  "action": "capabilitiesUpdate",
+  "code": 0,
+  "message": "ok",
+  "data": { "platforms": [...], "qualities": {...}, "actions": ["musicUrl"] }
+}
 ```

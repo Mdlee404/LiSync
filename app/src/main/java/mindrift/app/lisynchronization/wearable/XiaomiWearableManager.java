@@ -2,6 +2,8 @@ package mindrift.app.lisynchronization.wearable;
 
 import android.content.Context;
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.xiaomi.xms.wearable.Wearable;
 import com.xiaomi.xms.wearable.auth.AuthApi;
 import com.xiaomi.xms.wearable.auth.Permission;
@@ -17,20 +19,27 @@ import com.xiaomi.xms.wearable.service.ServiceApi;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageInfo;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import mindrift.app.lisynchronization.core.script.ScriptManager;
 import mindrift.app.lisynchronization.core.proxy.RequestProxy;
 import mindrift.app.lisynchronization.model.ResolveRequest;
 import mindrift.app.lisynchronization.utils.Logger;
 
 public class XiaomiWearableManager {
+    private static final String ACTION_CAPABILITIES = "capabilities";
+    private static final String ACTION_GET_CAPABILITIES = "getCapabilities";
+    private static final String ACTION_CAPABILITIES_UPDATE = "capabilitiesUpdate";
     private static final Permission[] REQUIRED_PERMISSIONS = new Permission[]{
             Permission.DEVICE_MANAGER,
             Permission.NOTIFY
     };
     private final Context context;
     private final RequestProxy requestProxy;
+    private final ScriptManager scriptManager;
     private final NodeApi nodeApi;
     private final MessageApi messageApi;
     private final AuthApi authApi;
@@ -117,9 +126,10 @@ public class XiaomiWearableManager {
         }
     };
 
-    public XiaomiWearableManager(Context context, RequestProxy requestProxy) {
+    public XiaomiWearableManager(Context context, RequestProxy requestProxy, ScriptManager scriptManager) {
         this.context = context.getApplicationContext();
         this.requestProxy = requestProxy;
+        this.scriptManager = scriptManager;
         this.nodeApi = Wearable.getNodeApi(this.context);
         this.messageApi = Wearable.getMessageApi(this.context);
         this.authApi = Wearable.getAuthApi(this.context);
@@ -212,6 +222,7 @@ public class XiaomiWearableManager {
                                 Logger.info("Message listener added for node: " + nodeId);
                                 queryDeviceStatus(nodeId);
                                 subscribeStatus(nodeId);
+                                sendCapabilities(nodeId, true);
                             })
                             .addOnFailureListener(e -> Logger.error("Add message listener failed: " + e.getMessage(), e));
                 })
@@ -222,7 +233,22 @@ public class XiaomiWearableManager {
         executor.execute(() -> {
             String payload = new String(message, StandardCharsets.UTF_8);
             Logger.info("Received message from wearable: " + payload);
-            ResolveRequest request = gson.fromJson(payload, ResolveRequest.class);
+            JsonObject json = null;
+            try {
+                json = gson.fromJson(payload, JsonObject.class);
+            } catch (Exception ignored) {
+            }
+            if (isCapabilitiesRequest(json)) {
+                sendCapabilities(nodeId, false);
+                return;
+            }
+            ResolveRequest request;
+            try {
+                request = gson.fromJson(payload, ResolveRequest.class);
+            } catch (Exception e) {
+                sendMessage(nodeId, gson.toJson(new ErrorResponse("Invalid request", null)));
+                return;
+            }
             requestProxy.resolve(request, new RequestProxy.ResolveCallback() {
                 @Override
                 public void onSuccess(String responseJson) {
@@ -231,7 +257,7 @@ public class XiaomiWearableManager {
 
                 @Override
                 public void onFailure(Exception e) {
-                    sendMessage(nodeId, gson.toJson(new ErrorResponse(e.getMessage())));
+                    sendMessage(nodeId, gson.toJson(new ErrorResponse(e.getMessage(), request)));
                 }
             });
         });
@@ -242,6 +268,28 @@ public class XiaomiWearableManager {
         messageApi.sendMessage(nodeId, data)
                 .addOnSuccessListener(result -> Logger.info("Response sent to wearable"))
                 .addOnFailureListener(e -> Logger.error("Send message failed: " + e.getMessage(), e));
+    }
+
+    private void sendCapabilities(String nodeId, boolean update) {
+        if (nodeId == null || nodeId.isEmpty()) return;
+        Map<String, Object> payload = buildCapabilitiesPayload(update ? ACTION_CAPABILITIES_UPDATE : ACTION_CAPABILITIES);
+        sendMessage(nodeId, gson.toJson(payload));
+    }
+
+    private Map<String, Object> buildCapabilitiesPayload(String action) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("action", action);
+        payload.put("code", 0);
+        payload.put("message", "ok");
+        Map<String, Object> data = scriptManager == null ? new HashMap<>() : scriptManager.getCapabilitiesSummary();
+        payload.put("data", data);
+        return payload;
+    }
+
+    public void notifyCapabilitiesChanged() {
+        if (listenerNodeId != null) {
+            sendCapabilities(listenerNodeId, true);
+        }
     }
 
     private void queryDeviceStatus(String nodeId) {
@@ -314,6 +362,31 @@ public class XiaomiWearableManager {
         return isPackageInstalled("com.xiaomi.wearable") || isPackageInstalled("com.mi.health");
     }
 
+    private boolean isCapabilitiesRequest(JsonObject json) {
+        if (json == null) return false;
+        String action = getString(json, "action");
+        String type = getString(json, "type");
+        String cmd = getString(json, "cmd");
+        return isCapabilityAction(action) || isCapabilityAction(type) || isCapabilityAction(cmd);
+    }
+
+    private boolean isCapabilityAction(String value) {
+        if (value == null) return false;
+        return ACTION_GET_CAPABILITIES.equalsIgnoreCase(value)
+                || ACTION_CAPABILITIES.equalsIgnoreCase(value);
+    }
+
+    private String getString(JsonObject obj, String key) {
+        if (obj == null || key == null || !obj.has(key)) return null;
+        try {
+            JsonElement el = obj.get(key);
+            if (el == null || el.isJsonNull()) return null;
+            return el.getAsString();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private void updateConnectedStatus(boolean connected) {
         synchronized (this) {
             connectedStatus = connected;
@@ -354,9 +427,23 @@ public class XiaomiWearableManager {
     }
 
     private static class ErrorResponse {
+        final int code;
+        final String message;
+        final Object info;
         final Object error;
-        ErrorResponse(String message) {
-            this.error = new ErrorDetail(message == null ? "Unknown error" : message);
+
+        ErrorResponse(String message, ResolveRequest request) {
+            this.code = -1;
+            this.message = message == null ? "Unknown error" : message;
+            Map<String, Object> info = new HashMap<>();
+            if (request != null) {
+                info.put("platform", request.getSource());
+                info.put("action", request.getAction() == null ? "musicUrl" : request.getAction());
+                info.put("quality", request.getQuality());
+                info.put("songId", request.resolveSongId());
+            }
+            this.info = info.isEmpty() ? null : info;
+            this.error = new ErrorDetail(this.message);
         }
     }
 

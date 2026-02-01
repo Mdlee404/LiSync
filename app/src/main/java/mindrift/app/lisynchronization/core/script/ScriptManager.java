@@ -15,6 +15,10 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import mindrift.app.lisynchronization.core.engine.LxNativeImpl;
 import mindrift.app.lisynchronization.core.network.HttpClient;
@@ -30,11 +34,16 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
     private final Map<String, List<ScriptHandler>> sourceMap = new ConcurrentHashMap<>();
     private final Map<String, Integer> sourceIndex = new ConcurrentHashMap<>();
     private final HttpClient httpClient = new HttpClient();
+    private final List<ScriptChangeListener> changeListeners = new CopyOnWriteArrayList<>();
     private static final int LOG_LIMIT = 2000;
 
     public interface ImportCallback {
         void onSuccess(File file);
         void onFailure(Exception e);
+    }
+
+    public interface ScriptChangeListener {
+        void onScriptsChanged();
     }
 
     public ScriptManager(Context context) {
@@ -59,6 +68,7 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
         for (File file : files) {
             loadScript(file);
         }
+        notifyScriptsChanged();
     }
 
     public List<String> getLoadedScriptIds() {
@@ -68,6 +78,57 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
     public ScriptInfo getScriptInfo(String scriptId) {
         if (scriptId == null) return null;
         return scriptInfos.get(scriptId);
+    }
+
+    public void addChangeListener(ScriptChangeListener listener) {
+        if (listener != null) {
+            changeListeners.add(listener);
+        }
+    }
+
+    public void removeChangeListener(ScriptChangeListener listener) {
+        if (listener != null) {
+            changeListeners.remove(listener);
+        }
+    }
+
+    public Map<String, Object> getCapabilitiesSummary() {
+        Map<String, Set<String>> qualities = new LinkedHashMap<>();
+        for (Map.Entry<String, ScriptInfo> entry : scriptInfos.entrySet()) {
+            ScriptInfo info = entry.getValue();
+            if (info == null || info.getSources() == null) continue;
+            for (Map.Entry<String, SourceInfo> sourceEntry : info.getSources().entrySet()) {
+                String source = sourceEntry.getKey();
+                SourceInfo sourceInfo = sourceEntry.getValue();
+                if (source == null || sourceInfo == null) continue;
+                if (sourceInfo.getType() != null && !"music".equalsIgnoreCase(sourceInfo.getType())) continue;
+                List<String> actions = sourceInfo.getActions();
+                if (actions != null && !actions.isEmpty() && !actions.contains("musicUrl")) continue;
+                Set<String> list = qualities.computeIfAbsent(source, k -> new LinkedHashSet<>());
+                List<String> qs = sourceInfo.getQualitys();
+                if (qs != null && !qs.isEmpty()) {
+                    list.addAll(qs);
+                }
+            }
+        }
+        List<String> orderedSources = new ArrayList<>();
+        String[] preferred = new String[]{"tx", "wy", "kg", "kw", "mg", "local"};
+        for (String key : preferred) {
+            if (qualities.containsKey(key)) orderedSources.add(key);
+        }
+        for (String key : qualities.keySet()) {
+            if (!orderedSources.contains(key)) orderedSources.add(key);
+        }
+        Map<String, List<String>> qualityMap = new LinkedHashMap<>();
+        for (String source : orderedSources) {
+            Set<String> list = qualities.get(source);
+            qualityMap.put(source, list == null ? new ArrayList<>() : new ArrayList<>(list));
+        }
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("platforms", orderedSources);
+        summary.put("qualities", qualityMap);
+        summary.put("actions", Collections.singletonList("musicUrl"));
+        return summary;
     }
 
     public List<File> listScriptFiles() {
@@ -386,6 +447,16 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
             name = idx >= 0 ? url.substring(idx + 1) : "script_" + System.currentTimeMillis();
         }
         return sanitizeFileName(name);
+    }
+
+    private void notifyScriptsChanged() {
+        for (ScriptChangeListener listener : changeListeners) {
+            try {
+                listener.onScriptsChanged();
+            } catch (Exception e) {
+                Logger.warn("Script change listener failed: " + e.getMessage());
+            }
+        }
     }
 
 

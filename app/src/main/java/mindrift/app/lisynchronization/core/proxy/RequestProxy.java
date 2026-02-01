@@ -61,7 +61,7 @@ public class RequestProxy {
             CacheEntry cached = cacheManager.get(cacheKey);
             if (cached != null) {
                 Logger.info("Cache hit: " + cacheKey + " via " + cached.getProvider());
-                return buildResponse(action, cached.getData(), cached.getProvider());
+                return buildResponse(request, action, quality, songId, cached.getData(), cached.getProvider());
             }
         } else {
             Logger.info("Cache skipped (nocache=true)");
@@ -72,7 +72,7 @@ public class RequestProxy {
             if (handler == null) {
                 throw new Exception("No provider found for source: " + source);
             }
-            return executeWithHandler(request, handler, cacheKey, action, quality);
+            return executeWithHandler(request, handler, cacheKey, action, quality, songId);
         }
 
         List<ScriptHandler> handlers = scriptManager.getOrderedHandlers(source, action);
@@ -83,7 +83,7 @@ public class RequestProxy {
         Exception lastError = null;
         for (ScriptHandler handler : handlers) {
             try {
-                return executeWithHandler(request, handler, cacheKey, action, quality);
+                return executeWithHandler(request, handler, cacheKey, action, quality, songId);
             } catch (Exception e) {
                 lastError = e;
                 Logger.warn("Provider failed: " + handler.getScriptId() + " - " + e.getMessage());
@@ -93,17 +93,26 @@ public class RequestProxy {
         throw new Exception(lastError == null ? "All providers failed" : lastError.getMessage());
     }
 
-    private String buildResponse(String action, Object data, String provider) {
+    private String buildResponse(ResolveRequest request, String action, String quality, String songId, Object data, String provider) {
         Map<String, Object> payload = new HashMap<>();
+        payload.put("code", 0);
+        payload.put("message", "ok");
         payload.put("data", data);
         payload.put("provider", provider);
         if ("musicUrl".equals(action) && data instanceof String) {
             payload.put("url", data);
         }
+        Map<String, Object> info = new HashMap<>();
+        info.put("platform", request == null ? null : request.getSource());
+        info.put("action", action);
+        info.put("quality", quality);
+        info.put("songId", songId);
+        info.put("provider", provider);
+        payload.put("info", info);
         return gson.toJson(payload);
     }
 
-    private String executeWithHandler(ResolveRequest request, ScriptHandler handler, String cacheKey, String action, String quality) throws Exception {
+    private String executeWithHandler(ResolveRequest request, ScriptHandler handler, String cacheKey, String action, String quality, String songId) throws Exception {
         String targetQuality = quality;
         if (!handler.supportsQuality(targetQuality)) {
             Logger.warn("Quality not supported by handler, fallback to 128k");
@@ -123,7 +132,7 @@ public class RequestProxy {
             data = response.get("url");
         }
         cacheManager.put(cacheKey, data, handler.getScriptId());
-        return buildResponse(action, data, handler.getScriptId());
+        return buildResponse(request, action, targetQuality, songId, data, handler.getScriptId());
     }
 
     private String trimLog(String value) {

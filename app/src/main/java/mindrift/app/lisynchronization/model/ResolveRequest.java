@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class ResolveRequest {
+    @SerializedName(value = "source", alternate = {"platform"})
     private String source;
     private String action;
     private String quality;
@@ -12,7 +13,7 @@ public class ResolveRequest {
     @SerializedName("targetScriptId")
     private String targetScriptId;
     private MusicInfo musicInfo;
-    @SerializedName("songid")
+    @SerializedName(value = "songid", alternate = {"id", "songId", "songID"})
     private String songId;
 
     public String getSource() {
