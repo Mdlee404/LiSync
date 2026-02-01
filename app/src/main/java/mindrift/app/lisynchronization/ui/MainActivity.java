@@ -1,6 +1,8 @@
 package mindrift.app.lisynchronization.ui;
 
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.InputType;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
@@ -25,17 +27,25 @@ import mindrift.app.lisynchronization.R;
 import mindrift.app.lisynchronization.core.cache.CacheEntry;
 import mindrift.app.lisynchronization.core.cache.CacheManager;
 import mindrift.app.lisynchronization.core.script.ScriptManager;
+import mindrift.app.lisynchronization.wearable.XiaomiWearableManager;
 
 public class MainActivity extends AppCompatActivity {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private CacheManager cacheManager;
     private ScriptManager scriptManager;
+    private XiaomiWearableManager wearableManager;
     private TextView scriptCountText;
     private TextView cacheCountText;
     private TextView lastUpdatedText;
+    private TextView deviceStatusText;
     private AutoCompleteTextView scriptDropdown;
     private final java.util.List<String> scriptOptions = new java.util.ArrayList<>();
     private ActivityResultLauncher<String[]> importLauncher;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Runnable deviceStatusRefresh = this::updateDeviceStatus;
+    private final Runnable deviceStatusRefreshDelayed = this::updateDeviceStatus;
+    private boolean serviceDialogShown = false;
+    private boolean deviceDialogShown = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -45,10 +55,12 @@ public class MainActivity extends AppCompatActivity {
         App app = (App) getApplication();
         cacheManager = app.getCacheManager();
         scriptManager = app.getScriptManager();
+        wearableManager = app.getWearableManager();
 
         scriptCountText = findViewById(R.id.text_script_count);
         cacheCountText = findViewById(R.id.text_cache_count);
         lastUpdatedText = findViewById(R.id.text_last_updated);
+        deviceStatusText = findViewById(R.id.text_device_status);
         scriptDropdown = findViewById(R.id.dropdown_script_home);
 
         MaterialButton refreshButton = findViewById(R.id.button_refresh);
@@ -61,7 +73,10 @@ public class MainActivity extends AppCompatActivity {
         MaterialButton deleteScriptButton = findViewById(R.id.button_script_delete_home);
         MaterialButton openSettingsButton = findViewById(R.id.button_open_settings);
 
-        refreshButton.setOnClickListener(v -> refreshData());
+        refreshButton.setOnClickListener(v -> {
+            requestWearableRefresh();
+            refreshData();
+        });
         clearCacheButton.setOnClickListener(v -> {
             cacheManager.clear();
             refreshData();
@@ -90,6 +105,8 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        mainHandler.removeCallbacks(deviceStatusRefresh);
+        mainHandler.removeCallbacks(deviceStatusRefreshDelayed);
         executor.shutdown();
     }
 
@@ -103,8 +120,78 @@ public class MainActivity extends AppCompatActivity {
                 cacheCountText.setText(String.valueOf(entries.size()));
                 lastUpdatedText.setText(lastUpdated);
                 updateScriptDropdown(loadedIds);
+                updateDeviceStatus();
             });
         });
+    }
+
+    private void requestWearableRefresh() {
+        if (wearableManager == null) return;
+        wearableManager.refreshNodes();
+        scheduleDeviceStatusRefresh();
+    }
+
+    private void updateDeviceStatus() {
+        if (wearableManager == null || deviceStatusText == null) return;
+        boolean wearableInstalled = wearableManager.isWearableAppInstalledForUi();
+        boolean serviceConnected = wearableManager.isServiceConnected();
+        String nodeId = wearableManager.getCurrentNodeId();
+        String nodeName = wearableManager.getCurrentNodeName();
+        Boolean connected = wearableManager.getConnectedStatus();
+        String statusText;
+        if (!wearableInstalled) {
+            statusText = getString(R.string.device_status_no_app);
+        } else if (!serviceConnected) {
+            statusText = getString(R.string.device_status_service_disconnected);
+        } else if (nodeId == null || nodeId.isEmpty()) {
+            statusText = getString(R.string.device_status_no_device);
+        } else {
+            String name = (nodeName == null || nodeName.trim().isEmpty()) ? nodeId : nodeName;
+            if (connected == null) {
+                statusText = getString(R.string.device_status_connected, name);
+            } else {
+                statusText = getString(connected ? R.string.device_status_connected : R.string.device_status_disconnected, name);
+            }
+        }
+        deviceStatusText.setText(statusText);
+        maybeShowWearableDialog(wearableInstalled, serviceConnected, nodeId);
+    }
+
+    private void scheduleDeviceStatusRefresh() {
+        mainHandler.removeCallbacks(deviceStatusRefresh);
+        mainHandler.removeCallbacks(deviceStatusRefreshDelayed);
+        mainHandler.postDelayed(deviceStatusRefresh, 800);
+        mainHandler.postDelayed(deviceStatusRefreshDelayed, 2000);
+    }
+
+    private void maybeShowWearableDialog(boolean wearableInstalled, boolean serviceConnected, String nodeId) {
+        if (!wearableInstalled) return;
+        if (!serviceConnected) {
+            if (!serviceDialogShown) {
+                serviceDialogShown = true;
+                new MaterialAlertDialogBuilder(this)
+                        .setTitle(getString(R.string.dialog_service_title))
+                        .setMessage(getString(R.string.dialog_service_message))
+                        .setPositiveButton(getString(R.string.dialog_retry), (dialog, which) -> requestWearableRefresh())
+                        .setNegativeButton(getString(R.string.dialog_ignore), null)
+                        .show();
+            }
+            return;
+        }
+        serviceDialogShown = false;
+        if (nodeId == null || nodeId.isEmpty()) {
+            if (!deviceDialogShown) {
+                deviceDialogShown = true;
+                new MaterialAlertDialogBuilder(this)
+                        .setTitle(getString(R.string.dialog_device_title))
+                        .setMessage(getString(R.string.dialog_device_message))
+                        .setPositiveButton(getString(R.string.dialog_retry), (dialog, which) -> requestWearableRefresh())
+                        .setNegativeButton(getString(R.string.dialog_ignore), null)
+                        .show();
+            }
+        } else {
+            deviceDialogShown = false;
+        }
     }
 
     private void handleImportFile(android.net.Uri uri) {
