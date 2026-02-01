@@ -229,7 +229,7 @@ public class XiaomiWearableManager {
                                 Logger.info("Message listener added for node: " + nodeId);
                                 queryDeviceStatus(nodeId);
                                 subscribeStatus(nodeId);
-                                sendCapabilities(nodeId, true);
+                                sendCapabilities(nodeId, true, null);
                             })
                             .addOnFailureListener(e -> Logger.error("Add message listener failed: " + e.getMessage(), e));
                 })
@@ -245,35 +245,36 @@ public class XiaomiWearableManager {
                 json = gson.fromJson(payload, JsonObject.class);
             } catch (Exception ignored) {
             }
+            String requestId = getString(json, "_requestId");
             if (isCapabilitiesRequest(json)) {
-                sendCapabilities(nodeId, false);
+                sendCapabilities(nodeId, false, requestId);
                 return;
             }
             String action = getString(json, "action");
             if (ACTION_SEARCH.equalsIgnoreCase(action)) {
-                handleSearch(nodeId, json);
+                handleSearch(nodeId, json, requestId);
                 return;
             }
             if (ACTION_LYRIC.equalsIgnoreCase(action) || ACTION_GET_LYRIC.equalsIgnoreCase(action)) {
-                handleLyric(nodeId, json);
+                handleLyric(nodeId, json, requestId);
                 return;
             }
             ResolveRequest request;
             try {
                 request = gson.fromJson(payload, ResolveRequest.class);
             } catch (Exception e) {
-                sendMessage(nodeId, gson.toJson(new ErrorResponse("Invalid request", null)));
+                sendMessage(nodeId, gson.toJson(new ErrorResponse("Invalid request", null, requestId)));
                 return;
             }
             requestProxy.resolve(request, new RequestProxy.ResolveCallback() {
                 @Override
                 public void onSuccess(String responseJson) {
-                    sendMessage(nodeId, responseJson);
+                    sendMessage(nodeId, withRequestId(responseJson, requestId));
                 }
 
                 @Override
                 public void onFailure(Exception e) {
-                    sendMessage(nodeId, gson.toJson(new ErrorResponse(e.getMessage(), request)));
+                    sendMessage(nodeId, gson.toJson(new ErrorResponse(e.getMessage(), request, requestId)));
                 }
             });
         });
@@ -286,17 +287,20 @@ public class XiaomiWearableManager {
                 .addOnFailureListener(e -> Logger.error("Send message failed: " + e.getMessage(), e));
     }
 
-    private void sendCapabilities(String nodeId, boolean update) {
+    private void sendCapabilities(String nodeId, boolean update, String requestId) {
         if (nodeId == null || nodeId.isEmpty()) return;
-        Map<String, Object> payload = buildCapabilitiesPayload(update ? ACTION_CAPABILITIES_UPDATE : ACTION_CAPABILITIES);
+        Map<String, Object> payload = buildCapabilitiesPayload(update ? ACTION_CAPABILITIES_UPDATE : ACTION_CAPABILITIES, requestId);
         sendMessage(nodeId, gson.toJson(payload));
     }
 
-    private Map<String, Object> buildCapabilitiesPayload(String action) {
+    private Map<String, Object> buildCapabilitiesPayload(String action, String requestId) {
         Map<String, Object> payload = new HashMap<>();
         payload.put("action", action);
         payload.put("code", 0);
         payload.put("message", "ok");
+        if (requestId != null && !requestId.isEmpty()) {
+            payload.put("_requestId", requestId);
+        }
         Map<String, Object> data = scriptManager == null ? new HashMap<>() : scriptManager.getCapabilitiesSummary();
         payload.put("data", data);
         return payload;
@@ -304,22 +308,22 @@ public class XiaomiWearableManager {
 
     public void notifyCapabilitiesChanged() {
         if (listenerNodeId != null) {
-            sendCapabilities(listenerNodeId, true);
+            sendCapabilities(listenerNodeId, true, null);
         }
     }
 
-    private void handleSearch(String nodeId, JsonObject json) {
+    private void handleSearch(String nodeId, JsonObject json, String requestId) {
         String keyword = getString(json, "keyword");
         String platform = getString(json, "platform");
         int page = getInt(json, "page", 1);
         int pageSize = getInt(json, "pageSize", 20);
         if (keyword == null || keyword.trim().isEmpty()) {
-            sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_SEARCH, "Keyword missing")));
+            sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_SEARCH, "Keyword missing", requestId)));
             return;
         }
         SearchService.SearchResult result = searchService.search(platform, keyword, page, pageSize);
         if (result == null) {
-            sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_SEARCH, "Search failed")));
+            sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_SEARCH, "Search failed", requestId)));
             return;
         }
         Map<String, Object> data = new HashMap<>();
@@ -328,21 +332,21 @@ public class XiaomiWearableManager {
         data.put("pageSize", result.pageSize);
         data.put("total", result.total);
         data.put("results", result.results);
-        sendMessage(nodeId, gson.toJson(buildSuccessPayload(ACTION_SEARCH, data, buildInfo("search", result.platform, keyword, result.page, result.pageSize))));
+        sendMessage(nodeId, gson.toJson(buildSuccessPayload(ACTION_SEARCH, data, buildInfo("search", result.platform, keyword, result.page, result.pageSize), requestId)));
     }
 
-    private void handleLyric(String nodeId, JsonObject json) {
+    private void handleLyric(String nodeId, JsonObject json, String requestId) {
         String platform = getString(json, "platform");
         String id = getString(json, "id");
         if (id == null || id.isEmpty()) {
             id = getString(json, "songid");
         }
         if (platform == null || platform.trim().isEmpty()) {
-            sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_LYRIC, "Platform missing")));
+            sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_LYRIC, "Platform missing", requestId)));
             return;
         }
         if (id == null || id.trim().isEmpty()) {
-            sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_LYRIC, "SongId missing")));
+            sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_LYRIC, "SongId missing", requestId)));
             return;
         }
         LyricService.LyricResult result = lyricService.getLyric(platform, id);
@@ -351,10 +355,10 @@ public class XiaomiWearableManager {
         data.put("tlyric", result.tlyric);
         data.put("rlyric", result.rlyric);
         data.put("lxlyric", result.lxlyric);
-        sendMessage(nodeId, gson.toJson(buildSuccessPayload(ACTION_LYRIC, data, buildInfo("lyric", platform, id, null, null))));
+        sendMessage(nodeId, gson.toJson(buildSuccessPayload(ACTION_LYRIC, data, buildInfo("lyric", platform, id, null, null), requestId)));
     }
 
-    private Map<String, Object> buildSuccessPayload(String action, Map<String, Object> data, Map<String, Object> info) {
+    private Map<String, Object> buildSuccessPayload(String action, Map<String, Object> data, Map<String, Object> info, String requestId) {
         Map<String, Object> payload = new HashMap<>();
         payload.put("action", action);
         payload.put("code", 0);
@@ -363,10 +367,13 @@ public class XiaomiWearableManager {
         if (info != null) {
             payload.put("info", info);
         }
+        if (requestId != null && !requestId.isEmpty()) {
+            payload.put("_requestId", requestId);
+        }
         return payload;
     }
 
-    private Map<String, Object> buildErrorPayload(String action, String message) {
+    private Map<String, Object> buildErrorPayload(String action, String message, String requestId) {
         Map<String, Object> payload = new HashMap<>();
         payload.put("action", action);
         payload.put("code", -1);
@@ -374,6 +381,9 @@ public class XiaomiWearableManager {
         Map<String, Object> error = new HashMap<>();
         error.put("message", payload.get("message"));
         payload.put("error", error);
+        if (requestId != null && !requestId.isEmpty()) {
+            payload.put("_requestId", requestId);
+        }
         return payload;
     }
 
@@ -474,6 +484,23 @@ public class XiaomiWearableManager {
                 || ACTION_CAPABILITIES.equalsIgnoreCase(value);
     }
 
+    private String withRequestId(String responseJson, String requestId) {
+        if (requestId == null || requestId.isEmpty()) return responseJson;
+        if (responseJson == null || responseJson.trim().isEmpty()) {
+            return gson.toJson(buildErrorPayload("musicUrl", "Empty response", requestId));
+        }
+        try {
+            JsonObject obj = gson.fromJson(responseJson, JsonObject.class);
+            if (obj == null) {
+                return gson.toJson(buildErrorPayload("musicUrl", "Invalid response", requestId));
+            }
+            obj.addProperty("_requestId", requestId);
+            return gson.toJson(obj);
+        } catch (Exception e) {
+            return gson.toJson(buildErrorPayload("musicUrl", "Invalid response", requestId));
+        }
+    }
+
     private String getString(JsonObject obj, String key) {
         if (obj == null || key == null || !obj.has(key)) return null;
         try {
@@ -538,12 +565,14 @@ public class XiaomiWearableManager {
     private static class ErrorResponse {
         final int code;
         final String message;
+        final String _requestId;
         final Object info;
         final Object error;
 
-        ErrorResponse(String message, ResolveRequest request) {
+        ErrorResponse(String message, ResolveRequest request, String requestId) {
             this.code = -1;
             this.message = message == null ? "Unknown error" : message;
+            this._requestId = requestId;
             Map<String, Object> info = new HashMap<>();
             if (request != null) {
                 info.put("platform", request.getSource());

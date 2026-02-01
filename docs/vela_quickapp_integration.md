@@ -14,11 +14,14 @@
 
 > 说明：手机端已实现消息监听与权限申请，手表端只需按约定格式发送 JSON。
 
+**重要：所有请求都要带 `_requestId`，响应必须原样回传 `_requestId`。**
+
 ## 3. 获取支持平台/音质（手表 -> 手机）
 **请求示例**
 ```json
 {
-  "action": "getCapabilities"
+  "action": "getCapabilities",
+  "_requestId": "req_17273849123_1"
 }
 ```
 
@@ -28,6 +31,7 @@
   "action": "capabilities",
   "code": 0,
   "message": "ok",
+  "_requestId": "req_17273849123_1",
   "data": {
     "platforms": ["tx", "wy", "kg", "kw", "mg", "local"],
     "qualities": {
@@ -50,7 +54,8 @@
   "platform": "tx",
   "keyword": "周杰伦",
   "page": 1,
-  "pageSize": 20
+  "pageSize": 20,
+  "_requestId": "req_17273849123_2"
 }
 ```
 
@@ -66,6 +71,7 @@
   "action": "search",
   "code": 0,
   "message": "ok",
+  "_requestId": "req_17273849123_2",
   "data": {
     "platform": "tx",
     "page": 1,
@@ -85,7 +91,8 @@
 {
   "action": "lyric",
   "platform": "tx",
-  "id": "001X0PDf0W4lBq"
+  "id": "001X0PDf0W4lBq",
+  "_requestId": "req_17273849123_3"
 }
 ```
 
@@ -99,6 +106,7 @@
   "action": "lyric",
   "code": 0,
   "message": "ok",
+  "_requestId": "req_17273849123_3",
   "data": {
     "lyric": "[00:00.00]...",
     "tlyric": null,
@@ -116,7 +124,8 @@
   "platform": "tx",
   "quality": "128k",
   "id": "001X0PDf0W4lBq",
-  "nocache": false
+  "nocache": false,
+  "_requestId": "req_17273849123_4"
 }
 ```
 
@@ -134,6 +143,7 @@
 {
   "code": 0,
   "message": "ok",
+  "_requestId": "req_17273849123_4",
   "data": "https://example.com/music.mp3",
   "url": "https://example.com/music.mp3",
   "provider": "lx-music-source-paid-1769840511495.js",
@@ -152,6 +162,7 @@
 {
   "code": -1,
   "message": "error message",
+  "_requestId": "req_17273849123_4",
   "error": {
     "message": "error message"
   }
@@ -190,6 +201,7 @@ const payload = {
   quality: '128k',
   id: '001X0PDf0W4lBq',
   nocache: false,
+  _requestId: 'req_' + Date.now(),
 };
 // 通过 Vela 侧消息通道发送 UTF-8 JSON
 sendMessage(JSON.stringify(payload));

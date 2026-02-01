@@ -104,8 +104,10 @@ public class SearchService {
                     String id = getString(item, "songmid");
                     String title = getString(item, "songname");
                     String artist = buildArtist(item.getAsJsonArray("singer"));
+                    String album = getString(item, "albumname");
+                    Integer duration = getIntObj(item, "interval");
                     if (id != null && !id.isEmpty()) {
-                        results.add(new SearchItem("tx", id, title, artist));
+                        results.add(new SearchItem("tx", id, title, artist, album, duration, null));
                     }
                 }
             }
@@ -133,8 +135,21 @@ public class SearchService {
                     String id = getString(item, "id");
                     String title = getString(item, "name");
                     String artist = buildArtist(item.getAsJsonArray("artists"));
+                    String album = null;
+                    Integer duration = null;
+                    JsonObject albumObj = getObject(item, "album");
+                    if (albumObj != null) {
+                        album = getString(albumObj, "name");
+                        duration = getIntObj(item, "duration");
+                    } else {
+                        duration = getIntObj(item, "duration");
+                    }
+                    String picUrl = albumObj != null ? getString(albumObj, "picUrl") : null;
+                    if (duration != null && duration > 1000) {
+                        duration = duration / 1000;
+                    }
                     if (id != null && !id.isEmpty()) {
-                        results.add(new SearchItem("wy", id, title, artist));
+                        results.add(new SearchItem("wy", id, title, artist, album, duration, picUrl));
                     }
                 }
             }
@@ -166,8 +181,15 @@ public class SearchService {
                     String id = getString(item, "hash");
                     String title = getString(item, "songname");
                     String artist = getString(item, "singername");
+                    String album = getString(item, "album_name");
+                    if (album == null) album = getString(item, "albumname");
+                    Integer duration = getIntObj(item, "duration");
+                    String picUrl = getString(item, "imgurl");
+                    if (picUrl != null) {
+                        picUrl = picUrl.replace("{size}", "400");
+                    }
                     if (id != null && !id.isEmpty()) {
-                        results.add(new SearchItem("kg", id, title, artist));
+                        results.add(new SearchItem("kg", id, title, artist, album, duration, picUrl));
                     }
                 }
             }
@@ -231,6 +253,17 @@ public class SearchService {
         }
     }
 
+    private Integer getIntObj(JsonObject obj, String key) {
+        if (obj == null || key == null || !obj.has(key)) return null;
+        try {
+            JsonElement el = obj.get(key);
+            if (el == null || el.isJsonNull()) return null;
+            return el.getAsInt();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private String buildArtist(JsonArray array) {
         if (array == null || array.size() == 0) return "";
         List<String> names = new ArrayList<>();
@@ -256,12 +289,18 @@ public class SearchService {
         public final String id;
         public final String title;
         public final String artist;
+        public final String album;
+        public final Integer duration;
+        public final String picUrl;
 
-        public SearchItem(String source, String id, String title, String artist) {
+        public SearchItem(String source, String id, String title, String artist, String album, Integer duration, String picUrl) {
             this.source = source;
             this.id = id;
             this.title = title;
             this.artist = artist;
+            this.album = album;
+            this.duration = duration;
+            this.picUrl = picUrl;
         }
     }
 
