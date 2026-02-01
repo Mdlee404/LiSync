@@ -1,4 +1,4 @@
-# AGENTS.md - LiSynchronization 项目上下文文档
+﻿# AGENTS.md - LiSynchronization 项目上下文文档
 
 本文档为 AI 代理提供 LiSynchronization 项目的全面上下文信息，帮助快速理解项目结构、开发流程和核心功能。
 
@@ -169,7 +169,7 @@ gradlew.bat connectedAndroidTest
 
 #### 应用配置
 
-- **Application ID**: `mindrift.app.lisynchronization`
+- **Application ID**: `mindrift.app.musiclite`
 - **Compile SDK**: 34
 - **Min SDK**: 28 (Android 9.0)
 - **Target SDK**: 34 (Android 14)
@@ -277,7 +277,7 @@ npm run bundle-android
 Android 应用采用模块化包结构：
 
 ```
-mindrift.app.lisynchronization/
+mindrift.app.musiclite/
 ├── ui/           # UI 相关组件
 ├── wearable/     # 小米穿戴集成
 ├── core/         # 核心功能

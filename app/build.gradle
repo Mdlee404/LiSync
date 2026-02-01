@@ -3,12 +3,12 @@ plugins {
 }
 
 android {
-    namespace 'mindrift.app.lisynchronization'
+    namespace 'mindrift.app.musiclite'
     compileSdk 34
 
 
     defaultConfig {
-        applicationId "mindrift.app.lisynchronization"
+        applicationId "mindrift.app.musiclite"
         minSdk 28
         targetSdk 34
         versionCode 1
@@ -59,3 +59,4 @@ dependencies {
     // Xiaomi Wearable SDK
     implementation fileTree(dir: "libs", include: ["*.jar", "*.aar"])
 }
+
