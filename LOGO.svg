@@ -1,0 +1,66 @@
+<?xml version="1.0" standalone="no"?>
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" id="lisync-logo" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+                <style>
+                    /* 轨道线条：减细到 9px */
+                    .cls-1 { fill: none; stroke: #1a1a1a; stroke-miterlimit: 10; stroke-width: 9px; }
+                    /* 字体 */
+                    .cls-3 { font-family: Arial, Helvetica, sans-serif; font-weight: bold; fill: #1a1a1a; }
+                    
+                    /* 球体样式 */
+                    .ball-border { 
+                        fill: #1a1a1a;       /* 黑色填充 */
+                        stroke: #ffffff;     /* 白色描边（用于遮挡） */
+                        stroke-width: 7px;   /* 【修改点】描边减细到 7px，匹配更细的轨道 */
+                        paint-order: stroke fill; 
+                    }
+                </style>
+            </defs>
+            
+            <!-- 1. 背景层：白色正方形 -->
+            <rect width="512" height="512" fill="#ffffff"/>
+
+            <!-- Group for the Atom graphic -->
+            <!-- 保持位置和整体缩放 -->
+            <g transform="translate(256, 210) scale(1.35)">
+                
+                <!-- 2. 轨道层 (Orbits) -->
+                <ellipse class="cls-1" rx="60" ry="130" transform="rotate(-60)"/>
+                <ellipse class="cls-1" rx="60" ry="130" transform="rotate(0)"/>
+                <ellipse class="cls-1" rx="60" ry="130" transform="rotate(60)"/>
+
+                <!-- 3. 原子核层 (Nucleus) -->
+                <!-- 【修改点】半径减小到 17，质子之间紧密堆积 -->
+                <circle class="ball-border" cx="-16" cy="-14" r="17"/>
+                <circle class="ball-border" cx="16" cy="-14" r="17"/>
+                <circle class="ball-border" cx="0" cy="16" r="17"/>
+
+                <!-- 4. 电子层 (Electrons) -->
+                <!-- 【修改点】半径减小到 17 -->
+                
+                <!-- Electron 1: On Orbit 3 (+60 deg) -->
+                <g transform="rotate(60)">
+                    <circle class="ball-border" cx="10.4" cy="-128" r="17"/>
+                </g>
+
+                <!-- Electron 2: On Orbit 1 (-60 deg) -->
+                <g transform="rotate(-60)">
+                    <circle class="ball-border" cx="-10.4" cy="-128" r="17"/>
+                </g>
+
+                <!-- Electron 3: On Orbit 1 (-60 deg) -->
+                <g transform="rotate(-60)">
+                    <circle class="ball-border" cx="-10.4" cy="128" r="17"/>
+                </g>
+
+                <!-- Electron 4: On Orbit 3 (+60 deg) -->
+                <g transform="rotate(60)">
+                    <circle class="ball-border" cx="10.4" cy="128" r="17"/>
+                </g>
+
+            </g>
+
+            <!-- Text Section -->
+            <text class="cls-3" x="256" y="470" text-anchor="middle" font-size="80" letter-spacing="-2">LiSync</text>
+            
+        </svg>

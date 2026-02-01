@@ -108,7 +108,7 @@ public class AgreementActivity extends AppCompatActivity {
     }
 
     private void applyAgreementTextToAnyTextView() {
-        int[] candidates = new int[] {
+        int[] candidates = new int[]{
                 R.id.text_agreement_content,
                 getIdByName("text_agreement"),
                 getIdByName("tv_agreement"),
@@ -148,3 +148,4 @@ public class AgreementActivity extends AppCompatActivity {
         startActivity(new Intent(this, MainActivity.class));
         finish();
     }
+}
