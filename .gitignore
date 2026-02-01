@@ -5,6 +5,8 @@
 /build/
 /app/build/
 /out/
+/keystore.properties
+/*.jks
 
 # Android Studio
 .cxx/

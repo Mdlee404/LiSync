@@ -16,6 +16,13 @@ android {
         keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
     }
 
+    def resolveStoreFile = {
+        if (!hasKeystore) return null
+        def value = keystoreProperties.getProperty('storeFile')
+        if (value == null || value.trim().isEmpty()) return null
+        def fileRef = rootProject.file(value)
+        return fileRef.exists() ? fileRef : null
+    }
 
     defaultConfig {
         applicationId "mindrift.app.musiclite"
@@ -36,10 +43,15 @@ android {
     signingConfigs {
         release {
             if (hasKeystore) {
-                storeFile file(keystoreProperties['storeFile'])
-                storePassword keystoreProperties['storePassword']
-                keyAlias keystoreProperties['keyAlias']
-                keyPassword keystoreProperties['keyPassword']
+                def storeFileRef = resolveStoreFile()
+                if (storeFileRef != null) {
+                    storeFile storeFileRef
+                    storePassword keystoreProperties['storePassword']
+                    keyAlias keystoreProperties['keyAlias']
+                    keyPassword keystoreProperties['keyPassword']
+                } else {
+                    throw new GradleException("Keystore file not found: " + keystoreProperties.getProperty('storeFile'))
+                }
             }
         }
     }
@@ -86,4 +98,3 @@ dependencies {
     // Xiaomi Wearable SDK
     implementation fileTree(dir: "libs", include: ["*.jar", "*.aar"])
 }
-
