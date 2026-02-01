@@ -3,6 +3,11 @@
     <string name="app_name">LiSync</string>
     <string name="header_title">LiSync 服务端</string>
     <string name="server_active">服务已就绪</string>
+    <string name="device_status_no_app">未检测到小米穿戴/小米健康</string>
+    <string name="device_status_service_disconnected">服务未连接</string>
+    <string name="device_status_no_device">未连接设备</string>
+    <string name="device_status_connected">设备: %1$s (已连接)</string>
+    <string name="device_status_disconnected">设备: %1$s (未连接)</string>
 
     <string name="label_loaded_scripts">已加载脚本</string>
     <string name="label_cache_entries">缓存条目</string>
@@ -10,9 +15,9 @@
     <string name="action_clear_cache">清理</string>
 
     <string name="section_console">音源管理</string>
-    <string name="action_import_file">文件</string>
-    <string name="action_import_url">链接</string>
-    <string name="action_reload_scripts">重载配置</string>
+    <string name="action_import_file">从文件导入</string>
+    <string name="action_import_url">从链接导入</string>
+    <string name="action_reload_scripts">重载音源配置</string>
 
     <string name="section_debug">调试</string>
     <string name="hint_script">目标脚本</string>
@@ -73,6 +78,12 @@
     <string name="import_script_url_placeholder">https://example.com/source.js</string>
     <string name="import_button">导入</string>
     <string name="cancel_button">取消</string>
+    <string name="dialog_service_title">服务提示</string>
+    <string name="dialog_service_message">小米穿戴服务未连接，请打开或重启服务后重试。</string>
+    <string name="dialog_device_title">连接提示</string>
+    <string name="dialog_device_message">未检测到已连接的设备，请确认设备已连接。</string>
+    <string name="dialog_retry">重试</string>
+    <string name="dialog_ignore">知道了</string>
 
     <string name="request_in_progress">请求处理中...</string>
     <string name="request_failed">请求失败: %1$s</string>
