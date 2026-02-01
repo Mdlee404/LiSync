@@ -24,7 +24,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import mindrift.app.lisynchronization.core.lyric.LyricService;
 import mindrift.app.lisynchronization.core.script.ScriptManager;
+import mindrift.app.lisynchronization.core.search.SearchService;
 import mindrift.app.lisynchronization.core.proxy.RequestProxy;
 import mindrift.app.lisynchronization.model.ResolveRequest;
 import mindrift.app.lisynchronization.utils.Logger;
@@ -33,6 +35,9 @@ public class XiaomiWearableManager {
     private static final String ACTION_CAPABILITIES = "capabilities";
     private static final String ACTION_GET_CAPABILITIES = "getCapabilities";
     private static final String ACTION_CAPABILITIES_UPDATE = "capabilitiesUpdate";
+    private static final String ACTION_SEARCH = "search";
+    private static final String ACTION_LYRIC = "lyric";
+    private static final String ACTION_GET_LYRIC = "getLyric";
     private static final Permission[] REQUIRED_PERMISSIONS = new Permission[]{
             Permission.DEVICE_MANAGER,
             Permission.NOTIFY
@@ -40,6 +45,8 @@ public class XiaomiWearableManager {
     private final Context context;
     private final RequestProxy requestProxy;
     private final ScriptManager scriptManager;
+    private final SearchService searchService = new SearchService();
+    private final LyricService lyricService = new LyricService();
     private final NodeApi nodeApi;
     private final MessageApi messageApi;
     private final AuthApi authApi;
@@ -242,6 +249,15 @@ public class XiaomiWearableManager {
                 sendCapabilities(nodeId, false);
                 return;
             }
+            String action = getString(json, "action");
+            if (ACTION_SEARCH.equalsIgnoreCase(action)) {
+                handleSearch(nodeId, json);
+                return;
+            }
+            if (ACTION_LYRIC.equalsIgnoreCase(action) || ACTION_GET_LYRIC.equalsIgnoreCase(action)) {
+                handleLyric(nodeId, json);
+                return;
+            }
             ResolveRequest request;
             try {
                 request = gson.fromJson(payload, ResolveRequest.class);
@@ -290,6 +306,88 @@ public class XiaomiWearableManager {
         if (listenerNodeId != null) {
             sendCapabilities(listenerNodeId, true);
         }
+    }
+
+    private void handleSearch(String nodeId, JsonObject json) {
+        String keyword = getString(json, "keyword");
+        String platform = getString(json, "platform");
+        int page = getInt(json, "page", 1);
+        int pageSize = getInt(json, "pageSize", 20);
+        if (keyword == null || keyword.trim().isEmpty()) {
+            sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_SEARCH, "Keyword missing")));
+            return;
+        }
+        SearchService.SearchResult result = searchService.search(platform, keyword, page, pageSize);
+        if (result == null) {
+            sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_SEARCH, "Search failed")));
+            return;
+        }
+        Map<String, Object> data = new HashMap<>();
+        data.put("platform", result.platform);
+        data.put("page", result.page);
+        data.put("pageSize", result.pageSize);
+        data.put("total", result.total);
+        data.put("results", result.results);
+        sendMessage(nodeId, gson.toJson(buildSuccessPayload(ACTION_SEARCH, data, buildInfo("search", result.platform, keyword, result.page, result.pageSize))));
+    }
+
+    private void handleLyric(String nodeId, JsonObject json) {
+        String platform = getString(json, "platform");
+        String id = getString(json, "id");
+        if (id == null || id.isEmpty()) {
+            id = getString(json, "songid");
+        }
+        if (platform == null || platform.trim().isEmpty()) {
+            sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_LYRIC, "Platform missing")));
+            return;
+        }
+        if (id == null || id.trim().isEmpty()) {
+            sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_LYRIC, "SongId missing")));
+            return;
+        }
+        LyricService.LyricResult result = lyricService.getLyric(platform, id);
+        Map<String, Object> data = new HashMap<>();
+        data.put("lyric", result.lyric);
+        data.put("tlyric", result.tlyric);
+        data.put("rlyric", result.rlyric);
+        data.put("lxlyric", result.lxlyric);
+        sendMessage(nodeId, gson.toJson(buildSuccessPayload(ACTION_LYRIC, data, buildInfo("lyric", platform, id, null, null))));
+    }
+
+    private Map<String, Object> buildSuccessPayload(String action, Map<String, Object> data, Map<String, Object> info) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("action", action);
+        payload.put("code", 0);
+        payload.put("message", "ok");
+        payload.put("data", data);
+        if (info != null) {
+            payload.put("info", info);
+        }
+        return payload;
+    }
+
+    private Map<String, Object> buildErrorPayload(String action, String message) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("action", action);
+        payload.put("code", -1);
+        payload.put("message", message == null ? "error" : message);
+        Map<String, Object> error = new HashMap<>();
+        error.put("message", payload.get("message"));
+        payload.put("error", error);
+        return payload;
+    }
+
+    private Map<String, Object> buildInfo(String action, String platform, String keywordOrId, Integer page, Integer pageSize) {
+        Map<String, Object> info = new HashMap<>();
+        info.put("action", action);
+        if (platform != null) info.put("platform", platform);
+        if (keywordOrId != null) {
+            if ("search".equals(action)) info.put("keyword", keywordOrId);
+            else info.put("songId", keywordOrId);
+        }
+        if (page != null) info.put("page", page);
+        if (pageSize != null) info.put("pageSize", pageSize);
+        return info;
     }
 
     private void queryDeviceStatus(String nodeId) {
@@ -384,6 +482,17 @@ public class XiaomiWearableManager {
             return el.getAsString();
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    private int getInt(JsonObject obj, String key, int fallback) {
+        if (obj == null || key == null || !obj.has(key)) return fallback;
+        try {
+            JsonElement el = obj.get(key);
+            if (el == null || el.isJsonNull()) return fallback;
+            return el.getAsInt();
+        } catch (Exception e) {
+            return fallback;
         }
     }
 
