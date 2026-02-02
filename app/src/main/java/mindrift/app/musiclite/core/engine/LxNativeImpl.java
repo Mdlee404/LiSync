@@ -478,6 +478,7 @@ public class LxNativeImpl implements LxNativeInterface {
             if (optionsObj instanceof Map) {
                 options.putAll((Map<String, Object>) optionsObj);
             }
+            maybeInjectSourceForCompat(url, options);
             Logger.info("Script request start: key=" + requestKey + " url=" + url + " options=" + trimLog(gson.toJson(options)));
             Call call = httpClient.requestWithCall(url, options, new HttpClient.NetworkCallback() {
                 @Override
@@ -512,6 +513,59 @@ public class LxNativeImpl implements LxNativeInterface {
             }
         } catch (Exception e) {
             Logger.warn("Script request parse error: " + e.getMessage());
+        }
+    }
+
+    private void maybeInjectSourceForCompat(String url, Map<String, Object> options) {
+        if (url == null || options == null) return;
+        String lowerUrl = url.toLowerCase();
+        if (!lowerUrl.contains("api.music.lerd.dpdns.org")) return;
+        Object bodyObj = options.get("body");
+        if (!(bodyObj instanceof String)) return;
+        String body = (String) bodyObj;
+        if (body.trim().isEmpty()) return;
+        try {
+            Map<String, Object> json = gson.fromJson(body, Map.class);
+            if (json == null) return;
+            String source = scriptContext.getLastRequestSource();
+            String quality = scriptContext.getLastRequestQuality();
+            String songId = scriptContext.getLastRequestSongId();
+            boolean patched = false;
+            if (source != null && !source.trim().isEmpty()) {
+                if (!json.containsKey("source")) {
+                    json.put("source", source);
+                    patched = true;
+                }
+                if (!json.containsKey("platform")) {
+                    json.put("platform", source);
+                    patched = true;
+                }
+            }
+            if (quality != null && !quality.trim().isEmpty()) {
+                if (!json.containsKey("quality")) {
+                    json.put("quality", quality);
+                    patched = true;
+                }
+                if (!json.containsKey("type")) {
+                    json.put("type", quality);
+                    patched = true;
+                }
+            }
+            if (songId != null && !songId.trim().isEmpty()) {
+                if (!json.containsKey("songid")) {
+                    json.put("songid", songId);
+                    patched = true;
+                }
+                if (!json.containsKey("id")) {
+                    json.put("id", songId);
+                    patched = true;
+                }
+            }
+            if (!patched) return;
+            String patchedJson = gson.toJson(json);
+            options.put("body", patchedJson);
+            Logger.info("Compat patch: injected fields into request body");
+        } catch (Exception ignored) {
         }
     }
 

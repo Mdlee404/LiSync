@@ -22,6 +22,10 @@ public class ScriptContext {
 
     // ????????????
     private volatile Object scriptInfo;
+    private volatile String lastRequestSource;
+    private volatile String lastRequestAction;
+    private volatile String lastRequestQuality;
+    private volatile String lastRequestSongId;
 
     public ScriptContext(String scriptId, String nativeKey) {
         this.scriptId = scriptId;
@@ -90,6 +94,32 @@ public class ScriptContext {
 
     public void setScriptInfo(Object scriptInfo) {
         this.scriptInfo = scriptInfo;
+    }
+
+    public void setLastRequestMeta(String source, String action, String quality) {
+        this.lastRequestSource = source;
+        this.lastRequestAction = action;
+        this.lastRequestQuality = quality;
+    }
+
+    public void setLastRequestSongId(String songId) {
+        this.lastRequestSongId = songId;
+    }
+
+    public String getLastRequestSource() {
+        return lastRequestSource;
+    }
+
+    public String getLastRequestAction() {
+        return lastRequestAction;
+    }
+
+    public String getLastRequestQuality() {
+        return lastRequestQuality;
+    }
+
+    public String getLastRequestSongId() {
+        return lastRequestSongId;
     }
 
     public void close() {

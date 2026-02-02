@@ -283,6 +283,32 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
         if (context == null) {
             return errorJson("Script not found: " + scriptId);
         }
+        try {
+            Map<String, Object> requestMeta = gson.fromJson(requestJson, Map.class);
+            if (requestMeta != null) {
+                Object sourceObj = requestMeta.get("source");
+                Object actionObj = requestMeta.get("action");
+                Map<String, Object> infoObj = requestMeta.get("info") instanceof Map ? (Map<String, Object>) requestMeta.get("info") : null;
+                Object qualityObj = infoObj != null ? infoObj.get("type") : null;
+                String songId = null;
+                if (infoObj != null && infoObj.get("musicInfo") instanceof Map) {
+                    Map<String, Object> musicInfo = (Map<String, Object>) infoObj.get("musicInfo");
+                    Object mid = musicInfo.get("songmid");
+                    Object hash = musicInfo.get("hash");
+                    if (mid != null && !String.valueOf(mid).isEmpty()) songId = String.valueOf(mid);
+                    else if (hash != null && !String.valueOf(hash).isEmpty()) songId = String.valueOf(hash);
+                }
+                context.setLastRequestMeta(
+                        sourceObj == null ? null : String.valueOf(sourceObj),
+                        actionObj == null ? null : String.valueOf(actionObj),
+                        qualityObj == null ? null : String.valueOf(qualityObj)
+                );
+                if (songId != null) {
+                    context.setLastRequestSongId(songId);
+                }
+            }
+        } catch (Exception ignored) {
+        }
         Map<String, Object> request = gson.fromJson(requestJson, Map.class);
         if (request == null) request = new HashMap<>();
         String requestKey = "request__" + System.currentTimeMillis() + "_" + Math.abs(new java.util.Random().nextInt());
