@@ -8,6 +8,44 @@
 3. 手表端安装 Vela 快应用（第三方 App）。
 4. 在小米穿戴 App 内为 LiSync 授权 **设备管理** 权限（首次连接会自动弹出）。
 
+## 1.1 包名与签名一致性（必做）
+**interconnect 通信前提**：快应用与安卓端三方应用的 **包名** 和 **签名** 必须一致。
+
+- 快应用 `manifest.json` 的 `package` 必须与安卓端包名一致：`mindrift.app.musiclite`
+- 快应用签名需要使用安卓端签名（`lisync.jks`）
+
+### 从 `lisync.jks` 提取签名（推荐流程）
+1) JKS 转 P12（会提示输入密码）
+```bash
+keytool -importkeystore -srckeystore lisync.jks -destkeystore lisync.p12 -srcstoretype jks -deststoretype pkcs12
+```
+
+2) P12 转 PEM（会提示输入 p12 密码）
+```bash
+openssl pkcs12 -nodes -in lisync.p12 -out lisync.pem
+```
+
+3) 拆分私钥与证书  
+- 将 `-----BEGIN PRIVATE KEY-----` 到 `-----END PRIVATE KEY-----` 保存为 `private.pem`  
+- 将 `-----BEGIN CERTIFICATE-----` 到 `-----END CERTIFICATE-----` 保存为 `certificate.pem`
+
+4) 放到快应用目录  
+```
+/sign/debug/private.pem
+/sign/debug/certificate.pem
+/sign/release/private.pem
+/sign/release/certificate.pem
+```
+
+### 在线签名生成工具
+如果本机没有 OpenSSL，可使用官方在线签名生成工具（本地 WASM，文件不会上传）：
+1) 上传 `lisync.p12` 并输入密码  
+2) 点击“生成签名”  
+3) 下载 `private.pem` 和 `certificate.pem`  
+
+### 真机测试建议
+安装新包前，先用包名卸载旧包，避免桌面残留导致覆盖失败。
+
 ## 2. 通信方式与编码
 - 通过小米穿戴 SDK 的 **MessageApi** 进行应用间消息通信。
 - 消息体使用 **UTF-8** 编码的 JSON 字符串。
@@ -15,6 +53,28 @@
 > 说明：手机端已实现消息监听与权限申请，手表端只需按约定格式发送 JSON。
 
 **重要：所有请求都要带 `_requestId`，响应必须原样回传 `_requestId`。**
+
+## 2.1 手表就绪握手（WATCH_READY）
+手表端连接成功后会发送 `WATCH_READY`，手机端会回 ACK 并推送能力集。
+
+**手表 -> 手机**
+```json
+{
+  "action": "WATCH_READY",
+  "_requestId": "req_17273849123_1"
+}
+```
+
+**手机 -> 手表**
+```json
+{
+  "action": "WATCH_READY_ACK",
+  "code": 0,
+  "message": "ok",
+  "_requestId": "req_17273849123_1"
+}
+```
+随后手机端会主动推送一次 `capabilitiesUpdate`。
 
 ## 3. 获取支持平台/音质（手表 -> 手机）
 **请求示例**
@@ -217,3 +277,59 @@ sendMessage(JSON.stringify(payload));
   "data": { "platforms": [...], "qualities": {...}, "actions": ["musicUrl"] }
 }
 ```
+
+## 13. 上传音乐文件（手机 -> 手表）
+手机端可主动推送音频文件到手表端保存（路径由手表端决定）。
+
+**开始**
+```json
+{
+  "action": "upload.start",
+  "_requestId": "upload_17273849123_5",
+  "fileId": "file_1700000000000",
+  "name": "demo.mp3",
+  "size": 1048576,
+  "mime": "audio/mpeg",
+  "chunkSize": 8192,
+  "total": 128,
+  "md5": "e10adc3949ba59abbe56e057f20f883e"
+}
+```
+
+**分片**
+```json
+{
+  "action": "upload.chunk",
+  "_requestId": "upload_17273849123_5",
+  "fileId": "file_1700000000000",
+  "index": 1,
+  "total": 128,
+  "data": "BASE64..."
+}
+```
+
+**结束**
+```json
+{
+  "action": "upload.finish",
+  "_requestId": "upload_17273849123_5",
+  "fileId": "file_1700000000000",
+  "total": 128,
+  "md5": "e10adc3949ba59abbe56e057f20f883e"
+}
+```
+
+**手表确认**
+```json
+{
+  "action": "upload.result",
+  "_requestId": "upload_17273849123_5",
+  "fileId": "file_1700000000000",
+  "ok": true,
+  "path": "/storage/vela/music/demo.mp3"
+}
+```
+
+**限制**
+- 单文件最大 5MB
+- 分片大小 8KB

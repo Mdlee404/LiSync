@@ -24,6 +24,9 @@
     <string name="hint_platform">平台</string>
     <string name="hint_action">动作</string>
     <string name="hint_song_id">ID / Hash</string>
+    <string name="hint_keyword">搜索关键词</string>
+    <string name="hint_page">页码</string>
+    <string name="hint_page_size">每页条数</string>
     <string name="hint_quality">音质</string>
     <string name="default_quality">128k</string>
     <string name="action_test_request">发起调试</string>
@@ -31,6 +34,7 @@
     <string name="action_edit_script">编辑</string>
     <string name="action_rename_script">重命名</string>
     <string name="action_delete_script">删除</string>
+    <string name="action_upload_music">上传音乐文件</string>
 
     <string name="terminal_title">日志</string>
     <string name="action_copy_logs">复制</string>
@@ -89,6 +93,11 @@
     <string name="request_failed">请求失败: %1$s</string>
     <string name="prompt_import_first">请先导入源脚本</string>
     <string name="prompt_input_song_id">请输入歌曲 ID</string>
+    <string name="upload_file_too_large">文件过大，最大 5MB</string>
+    <string name="upload_no_device">未连接设备，无法上传</string>
+    <string name="upload_starting">正在上传: %1$s</string>
+    <string name="upload_finished">上传完成: %1$s</string>
+    <string name="upload_failed">上传失败: %1$s</string>
 
     <string name="clipboard_label">LiSync 日志</string>
 
@@ -99,6 +108,7 @@
     <string name="platform_mg">咪咕 (MG)</string>
 
     <string name="action_music_url">播放链接 (musicUrl)</string>
+    <string name="action_search">搜索 (search)</string>
     <string name="action_lyric">歌词 (lyric)</string>
     <string name="action_pic">封面 (pic)</string>
 </resources>

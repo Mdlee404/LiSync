@@ -24,7 +24,9 @@ import mindrift.app.musiclite.App;
 import mindrift.app.musiclite.R;
 import mindrift.app.musiclite.core.cache.CacheEntry;
 import mindrift.app.musiclite.core.cache.CacheManager;
+import mindrift.app.musiclite.core.lyric.LyricService;
 import mindrift.app.musiclite.core.proxy.RequestProxy;
+import mindrift.app.musiclite.core.search.SearchService;
 import mindrift.app.musiclite.core.script.ScriptManager;
 import mindrift.app.musiclite.core.script.ScriptInfo;
 import mindrift.app.musiclite.core.script.SourceInfo;
@@ -46,11 +48,16 @@ public class SettingsActivity extends AppCompatActivity {
     private AutoCompleteTextView actionDropdown;
     private AutoCompleteTextView qualityDropdown;
     private TextInputEditText songIdInput;
+    private TextInputEditText keywordInput;
+    private TextInputEditText pageInput;
+    private TextInputEditText pageSizeInput;
     private final java.util.List<String> scriptOptions = new java.util.ArrayList<>();
     private final java.util.List<ActionItem> actionOptions = new java.util.ArrayList<>();
     private final java.util.List<PlatformItem> platformOptions = new java.util.ArrayList<>();
     private final java.util.List<QualityItem> qualityOptions = new java.util.ArrayList<>();
     private final com.google.gson.Gson gson = new com.google.gson.Gson();
+    private final SearchService searchService = new SearchService();
+    private final LyricService lyricService = new LyricService();
     private String lastResolvedUrl;
     private final AppLogBuffer.LogListener logListener = newLine -> runOnUiThread(this::refreshLogView);
 
@@ -74,6 +81,9 @@ public class SettingsActivity extends AppCompatActivity {
         actionDropdown = findViewById(R.id.dropdown_action);
         qualityDropdown = findViewById(R.id.dropdown_quality);
         songIdInput = findViewById(R.id.input_song_id);
+        keywordInput = findViewById(R.id.input_keyword);
+        pageInput = findViewById(R.id.input_page);
+        pageSizeInput = findViewById(R.id.input_page_size);
 
         MaterialButton cacheRefreshButton = findViewById(R.id.button_cache_refresh);
         MaterialButton cacheClearButton = findViewById(R.id.button_cache_clear);
@@ -98,10 +108,15 @@ public class SettingsActivity extends AppCompatActivity {
                 updateCapabilities(scriptOptions.get(position));
             }
         });
+        actionDropdown.setOnItemClickListener((parent, view, position, id) -> {
+            String actionLabel = actionDropdown.getText() == null ? "" : actionDropdown.getText().toString();
+            onActionChanged(actionLabel);
+        });
         platformDropdown.setOnItemClickListener((parent, view, position, id) -> {
             String scriptId = scriptDropdown.getText() == null ? "" : scriptDropdown.getText().toString();
             ScriptInfo info = scriptManager.getScriptInfo(scriptId);
-            updateQualityOptions(info);
+            String actionLabel = actionDropdown.getText() == null ? "" : actionDropdown.getText().toString();
+            updateQualityOptions(info, resolveActionValue(actionLabel));
         });
 
         setupDropdowns();
@@ -177,6 +192,8 @@ public class SettingsActivity extends AppCompatActivity {
     private void setupDropdowns() {
         actionOptions.clear();
         actionOptions.add(new ActionItem(getString(R.string.action_music_url), "musicUrl"));
+        actionOptions.add(new ActionItem(getString(R.string.action_search), "search"));
+        actionOptions.add(new ActionItem(getString(R.string.action_lyric), "lyric"));
 
         ArrayAdapter<String> actionAdapter = new ArrayAdapter<>(this,
                 android.R.layout.simple_list_item_1,
@@ -211,15 +228,10 @@ public class SettingsActivity extends AppCompatActivity {
         String actionLabel = actionDropdown.getText() == null ? "" : actionDropdown.getText().toString();
         String songId = songIdInput.getText() == null ? "" : songIdInput.getText().toString().trim();
         String qualityLabel = qualityDropdown.getText() == null ? "" : qualityDropdown.getText().toString().trim();
+        String keyword = keywordInput.getText() == null ? "" : keywordInput.getText().toString().trim();
+        String pageRaw = pageInput.getText() == null ? "" : pageInput.getText().toString().trim();
+        String pageSizeRaw = pageSizeInput.getText() == null ? "" : pageSizeInput.getText().toString().trim();
 
-        if (getString(R.string.no_scripts).equals(scriptLabel) || scriptLabel.isEmpty()) {
-            testResultText.setText(getString(R.string.prompt_import_first));
-            return;
-        }
-        if (songId.isEmpty()) {
-            testResultText.setText(getString(R.string.prompt_input_song_id));
-            return;
-        }
         String scriptId = scriptLabel;
         String platform = resolvePlatformValue(platformLabel);
         String action = resolveActionValue(actionLabel);
@@ -228,6 +240,42 @@ public class SettingsActivity extends AppCompatActivity {
         testResultText.setText(getString(R.string.request_in_progress));
         executor.execute(() -> {
             try {
+                if ("search".equalsIgnoreCase(action)) {
+                    if (keyword.isEmpty()) {
+                        runOnUiThread(() -> testResultText.setText(getString(R.string.request_failed, "关键词不能为空")));
+                        return;
+                    }
+                    int page = parseIntOrDefault(pageRaw, 1);
+                    int pageSize = parseIntOrDefault(pageSizeRaw, 20);
+                    SearchService.SearchResult result = searchService.search(platform, keyword, page, pageSize);
+                    String payload = gson.toJson(result);
+                    runOnUiThread(() -> {
+                        lastResolvedUrl = null;
+                        testResultText.setText(payload);
+                    });
+                    return;
+                }
+                if ("lyric".equalsIgnoreCase(action)) {
+                    if (songId.isEmpty()) {
+                        runOnUiThread(() -> testResultText.setText(getString(R.string.prompt_input_song_id)));
+                        return;
+                    }
+                    LyricService.LyricResult result = lyricService.getLyric(platform, songId);
+                    String payload = gson.toJson(result);
+                    runOnUiThread(() -> {
+                        lastResolvedUrl = null;
+                        testResultText.setText(payload);
+                    });
+                    return;
+                }
+                if (getString(R.string.no_scripts).equals(scriptLabel) || scriptLabel.isEmpty()) {
+                    runOnUiThread(() -> testResultText.setText(getString(R.string.prompt_import_first)));
+                    return;
+                }
+                if (songId.isEmpty()) {
+                    runOnUiThread(() -> testResultText.setText(getString(R.string.prompt_input_song_id)));
+                    return;
+                }
                 ResolveRequest request = new ResolveRequest();
                 request.setSource(platform);
                 request.setAction(action);
@@ -267,15 +315,17 @@ public class SettingsActivity extends AppCompatActivity {
         if (scriptCapabilitiesText == null) return;
         if (scriptId == null || getString(R.string.no_scripts).equals(scriptId)) {
             scriptCapabilitiesText.setText(getString(R.string.script_capabilities_placeholder));
-            updatePlatformOptions(null);
-            updateQualityOptions(null);
+            String actionLabel = actionDropdown.getText() == null ? "" : actionDropdown.getText().toString();
+            updatePlatformOptions(null, resolveActionValue(actionLabel));
+            updateQualityOptions(null, resolveActionValue(actionLabel));
             return;
         }
         ScriptInfo info = scriptManager.getScriptInfo(scriptId);
         if (info == null || info.getSources() == null || info.getSources().isEmpty()) {
             scriptCapabilitiesText.setText(getString(R.string.script_capabilities_empty));
-            updatePlatformOptions(null);
-            updateQualityOptions(null);
+            String actionLabel = actionDropdown.getText() == null ? "" : actionDropdown.getText().toString();
+            updatePlatformOptions(null, resolveActionValue(actionLabel));
+            updateQualityOptions(null, resolveActionValue(actionLabel));
             return;
         }
         StringBuilder builder = new StringBuilder();
@@ -295,12 +345,15 @@ public class SettingsActivity extends AppCompatActivity {
         scriptCapabilitiesText.setText(builder.length() == 0
                 ? getString(R.string.script_capabilities_empty)
                 : builder.toString());
-        updatePlatformOptions(info);
+        String actionLabel = actionDropdown.getText() == null ? "" : actionDropdown.getText().toString();
+        updatePlatformOptions(info, resolveActionValue(actionLabel));
     }
 
-    private void updatePlatformOptions(ScriptInfo info) {
+    private void updatePlatformOptions(ScriptInfo info, String action) {
         platformOptions.clear();
-        if (info != null && info.getSources() != null) {
+        if ("search".equalsIgnoreCase(action) || "lyric".equalsIgnoreCase(action)) {
+            addDefaultPlatforms();
+        } else if (info != null && info.getSources() != null) {
             for (Map.Entry<String, SourceInfo> entry : info.getSources().entrySet()) {
                 String source = entry.getKey();
                 SourceInfo sourceInfo = entry.getValue();
@@ -319,24 +372,28 @@ public class SettingsActivity extends AppCompatActivity {
                 mapPlatformLabels());
         platformDropdown.setAdapter(platformAdapter);
         platformDropdown.setText(platformOptions.get(0).label, false);
-        updateQualityOptions(info);
+        updateQualityOptions(info, action);
     }
 
-    private void updateQualityOptions(ScriptInfo info) {
+    private void updateQualityOptions(ScriptInfo info, String action) {
         qualityOptions.clear();
-        String platform = resolvePlatformValue(platformDropdown.getText() == null ? "" : platformDropdown.getText().toString());
-        List<String> qualitys = null;
-        if (info != null && info.getSources() != null) {
-            SourceInfo sourceInfo = info.getSources().get(platform);
-            if (sourceInfo != null) {
-                qualitys = sourceInfo.getQualitys();
-            }
-        }
-        if (qualitys == null || qualitys.isEmpty()) {
+        if (!"musicUrl".equalsIgnoreCase(action)) {
             qualityOptions.add(new QualityItem(getString(R.string.script_capabilities_any_quality), ""));
         } else {
-            for (String q : qualitys) {
-                qualityOptions.add(new QualityItem(q, q));
+            String platform = resolvePlatformValue(platformDropdown.getText() == null ? "" : platformDropdown.getText().toString());
+            List<String> qualitys = null;
+            if (info != null && info.getSources() != null) {
+                SourceInfo sourceInfo = info.getSources().get(platform);
+                if (sourceInfo != null) {
+                    qualitys = sourceInfo.getQualitys();
+                }
+            }
+            if (qualitys == null || qualitys.isEmpty()) {
+                qualityOptions.add(new QualityItem(getString(R.string.script_capabilities_any_quality), ""));
+            } else {
+                for (String q : qualitys) {
+                    qualityOptions.add(new QualityItem(q, q));
+                }
             }
         }
         ArrayAdapter<String> qualityAdapter = new ArrayAdapter<>(this,
@@ -473,6 +530,28 @@ public class SettingsActivity extends AppCompatActivity {
             labels[i] = qualityOptions.get(i).label;
         }
         return labels;
+    }
+
+    private void onActionChanged(String actionLabel) {
+        String action = resolveActionValue(actionLabel);
+        String scriptId = scriptDropdown.getText() == null ? "" : scriptDropdown.getText().toString();
+        ScriptInfo info = scriptManager.getScriptInfo(scriptId);
+        updatePlatformOptions(info, action);
+    }
+
+    private void addDefaultPlatforms() {
+        platformOptions.add(new PlatformItem(getString(R.string.platform_tx), "tx"));
+        platformOptions.add(new PlatformItem(getString(R.string.platform_wy), "wy"));
+        platformOptions.add(new PlatformItem(getString(R.string.platform_kg), "kg"));
+    }
+
+    private int parseIntOrDefault(String value, int fallback) {
+        if (value == null || value.trim().isEmpty()) return fallback;
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (Exception e) {
+            return fallback;
+        }
     }
 
     private static class ActionItem {

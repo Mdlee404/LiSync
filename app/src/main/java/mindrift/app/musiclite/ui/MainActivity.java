@@ -8,6 +8,7 @@ import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.net.Uri;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
@@ -41,6 +42,7 @@ public class MainActivity extends AppCompatActivity {
     private AutoCompleteTextView scriptDropdown;
     private final java.util.List<String> scriptOptions = new java.util.ArrayList<>();
     private ActivityResultLauncher<String[]> importLauncher;
+    private ActivityResultLauncher<String[]> uploadLauncher;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Runnable deviceStatusRefresh = this::updateDeviceStatus;
     private final Runnable deviceStatusRefreshDelayed = this::updateDeviceStatus;
@@ -67,6 +69,7 @@ public class MainActivity extends AppCompatActivity {
         MaterialButton clearCacheButton = findViewById(R.id.button_clear_cache);
         MaterialButton importFileButton = findViewById(R.id.button_import_file);
         MaterialButton importUrlButton = findViewById(R.id.button_import_url);
+        MaterialButton uploadMusicButton = findViewById(R.id.button_upload_music);
         MaterialButton reloadScriptsButton = findViewById(R.id.button_reload_scripts);
         MaterialButton editScriptButton = findViewById(R.id.button_script_edit_home);
         MaterialButton renameScriptButton = findViewById(R.id.button_script_rename_home);
@@ -93,6 +96,8 @@ public class MainActivity extends AppCompatActivity {
                 "application/x-javascript",
                 "text/plain"
         }));
+        uploadLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), this::handleUploadFile);
+        uploadMusicButton.setOnClickListener(v -> uploadLauncher.launch(new String[] {"audio/*"}));
         importUrlButton.setOnClickListener(v -> showImportUrlDialog());
         editScriptButton.setOnClickListener(v -> showEditScriptDialog());
         renameScriptButton.setOnClickListener(v -> showRenameScriptDialog());
@@ -211,6 +216,39 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception ignored) {
             }
             runOnUiThread(this::refreshData);
+        });
+    }
+
+    private void handleUploadFile(Uri uri) {
+        if (uri == null) return;
+        if (wearableManager == null || !wearableManager.isServiceConnected() || wearableManager.getCurrentNodeId() == null) {
+            Toast.makeText(this, getString(R.string.upload_no_device), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        DocumentFile doc = DocumentFile.fromSingleUri(this, uri);
+        String name = doc != null && doc.getName() != null ? doc.getName() : "music_" + System.currentTimeMillis();
+        Toast.makeText(this, getString(R.string.upload_starting, name), Toast.LENGTH_SHORT).show();
+        wearableManager.uploadMusic(uri, new XiaomiWearableManager.UploadCallback() {
+            @Override
+            public void onProgress(int percent) {
+                if (percent % 25 == 0) {
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "上传进度: " + percent + "%", Toast.LENGTH_SHORT).show());
+                }
+            }
+
+            @Override
+            public void onSuccess(String fileId, String message) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        getString(R.string.upload_finished, message == null ? fileId : message),
+                        Toast.LENGTH_LONG).show());
+            }
+
+            @Override
+            public void onFailure(String message) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        getString(R.string.upload_failed, message),
+                        Toast.LENGTH_LONG).show());
+            }
         });
     }
 

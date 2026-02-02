@@ -19,6 +19,31 @@
 
 ## 2. 接口定义
 
+### 2.0 Watch Ready (Handshake)
+手表端连接成功后会主动发送 `WATCH_READY`，手机端需回 ACK 并推送能力集。
+
+#### 请求 (Watch -> Phone)
+```json
+{
+  "action": "WATCH_READY",
+  "_requestId": "req_17273849123_1"
+}
+```
+
+#### 响应 (Phone -> Watch)
+```json
+{
+  "action": "WATCH_READY_ACK",
+  "code": 0,
+  "message": "ok",
+  "_requestId": "req_17273849123_1"
+}
+```
+
+随后手机端应主动推送一次 `capabilitiesUpdate`，以刷新手表端缓存。
+
+---
+
 ### 2.1 获取平台能力 (Capabilities)
 快应用启动时会调用此接口，查询 Android 端支持的音乐平台和音质。
 
@@ -188,6 +213,64 @@
   }
 }
 ```
+
+---
+
+### 2.6 上传音乐文件（Phone -> Watch）
+用于手机端将本地音频文件推送到手表端保存。手表端决定保存路径。
+
+#### 开始（Phone -> Watch）
+```json
+{
+  "action": "upload.start",
+  "_requestId": "upload_17273849123_5",
+  "fileId": "file_1700000000000",
+  "name": "demo.mp3",
+  "size": 1048576,
+  "mime": "audio/mpeg",
+  "chunkSize": 8192,
+  "total": 128,
+  "md5": "e10adc3949ba59abbe56e057f20f883e"
+}
+```
+
+#### 分片（Phone -> Watch）
+```json
+{
+  "action": "upload.chunk",
+  "_requestId": "upload_17273849123_5",
+  "fileId": "file_1700000000000",
+  "index": 1,
+  "total": 128,
+  "data": "BASE64..."
+}
+```
+
+#### 结束（Phone -> Watch）
+```json
+{
+  "action": "upload.finish",
+  "_requestId": "upload_17273849123_5",
+  "fileId": "file_1700000000000",
+  "total": 128,
+  "md5": "e10adc3949ba59abbe56e057f20f883e"
+}
+```
+
+#### 手表确认（Watch -> Phone）
+```json
+{
+  "action": "upload.result",
+  "_requestId": "upload_17273849123_5",
+  "fileId": "file_1700000000000",
+  "ok": true,
+  "path": "/storage/vela/music/demo.mp3"
+}
+```
+
+**限制**：
+- 单文件最大 **5MB**
+- 分片大小 **8KB**
 
 ---
 

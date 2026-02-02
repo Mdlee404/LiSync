@@ -182,6 +182,14 @@
                 android:text="@string/action_import_url" />
 
             <Button
+                android:id="@+id/button_upload_music"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:text="@string/action_upload_music" />
+
+            <Button
                 android:id="@+id/button_reload_scripts"
                 style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="match_parent"
