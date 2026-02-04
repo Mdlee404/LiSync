@@ -51,7 +51,7 @@ public class SettingsActivity extends AppCompatActivity {
     private TextInputEditText keywordInput;
     private TextInputEditText pageInput;
     private TextInputEditText pageSizeInput;
-    private final java.util.List<String> scriptOptions = new java.util.ArrayList<>();
+    private final java.util.List<ScriptOption> scriptOptions = new java.util.ArrayList<>();
     private final java.util.List<ActionItem> actionOptions = new java.util.ArrayList<>();
     private final java.util.List<PlatformItem> platformOptions = new java.util.ArrayList<>();
     private final java.util.List<QualityItem> qualityOptions = new java.util.ArrayList<>();
@@ -105,7 +105,7 @@ public class SettingsActivity extends AppCompatActivity {
         testResultText.setOnClickListener(v -> openResolvedUrl());
         scriptDropdown.setOnItemClickListener((parent, view, position, id) -> {
             if (position >= 0 && position < scriptOptions.size()) {
-                updateCapabilities(scriptOptions.get(position));
+                updateCapabilities(scriptOptions.get(position).scriptId);
             }
         });
         actionDropdown.setOnItemClickListener((parent, view, position, id) -> {
@@ -113,7 +113,8 @@ public class SettingsActivity extends AppCompatActivity {
             onActionChanged(actionLabel);
         });
         platformDropdown.setOnItemClickListener((parent, view, position, id) -> {
-            String scriptId = scriptDropdown.getText() == null ? "" : scriptDropdown.getText().toString();
+            String scriptLabel = scriptDropdown.getText() == null ? "" : scriptDropdown.getText().toString();
+            String scriptId = resolveScriptId(scriptLabel);
             ScriptInfo info = scriptManager.getScriptInfo(scriptId);
             String actionLabel = actionDropdown.getText() == null ? "" : actionDropdown.getText().toString();
             updateQualityOptions(info, resolveActionValue(actionLabel));
@@ -142,13 +143,13 @@ public class SettingsActivity extends AppCompatActivity {
     private void refreshData() {
         executor.execute(() -> {
             List<CacheEntry> entries = cacheManager.list();
-            List<String> loadedIds = scriptManager.getLoadedScriptIds();
+            List<ScriptManager.ScriptEntry> loadedScripts = scriptManager.getLoadedScripts();
             String summary = getString(R.string.cache_summary, entries.size());
             String cacheText = formatCacheList(entries);
             runOnUiThread(() -> {
                 cacheSummaryText.setText(summary);
                 cacheListText.setText(cacheText);
-                updateScriptDropdown(loadedIds);
+                updateScriptDropdown(loadedScripts);
             });
         });
     }
@@ -203,23 +204,28 @@ public class SettingsActivity extends AppCompatActivity {
             actionDropdown.setText(actionOptions.get(0).label, false);
         }
 
-        updateScriptDropdown(scriptManager.getLoadedScriptIds());
+        updateScriptDropdown(scriptManager.getLoadedScripts());
     }
 
-    private void updateScriptDropdown(List<String> scriptIds) {
+    private void updateScriptDropdown(List<ScriptManager.ScriptEntry> scripts) {
         scriptOptions.clear();
-        if (scriptIds != null) {
-            scriptOptions.addAll(scriptIds);
+        if (scripts != null) {
+            for (ScriptManager.ScriptEntry entry : scripts) {
+                if (entry == null) continue;
+                scriptOptions.add(new ScriptOption(entry.getScriptId(), entry.getDisplayName()));
+            }
         }
         if (scriptOptions.isEmpty()) {
-            scriptOptions.add(getString(R.string.no_scripts));
+            scriptOptions.add(new ScriptOption(null, getString(R.string.no_scripts)));
+        } else {
+            applyDuplicateLabels();
         }
         ArrayAdapter<String> scriptAdapter = new ArrayAdapter<>(this,
                 android.R.layout.simple_list_item_1,
-                scriptOptions);
+                mapScriptLabels());
         scriptDropdown.setAdapter(scriptAdapter);
-        scriptDropdown.setText(scriptOptions.get(0), false);
-        updateCapabilities(scriptOptions.get(0));
+        scriptDropdown.setText(scriptOptions.get(0).label, false);
+        updateCapabilities(scriptOptions.get(0).scriptId);
     }
 
     private void runTestRequest() {
@@ -232,7 +238,7 @@ public class SettingsActivity extends AppCompatActivity {
         String pageRaw = pageInput.getText() == null ? "" : pageInput.getText().toString().trim();
         String pageSizeRaw = pageSizeInput.getText() == null ? "" : pageSizeInput.getText().toString().trim();
 
-        String scriptId = scriptLabel;
+        String scriptId = resolveScriptId(scriptLabel);
         String platform = resolvePlatformValue(platformLabel);
         String action = resolveActionValue(actionLabel);
         String quality = resolveQualityValue(qualityLabel);
@@ -268,7 +274,7 @@ public class SettingsActivity extends AppCompatActivity {
                     });
                     return;
                 }
-                if (getString(R.string.no_scripts).equals(scriptLabel) || scriptLabel.isEmpty()) {
+                if (scriptId == null || scriptId.isEmpty()) {
                     runOnUiThread(() -> testResultText.setText(getString(R.string.prompt_import_first)));
                     return;
                 }
@@ -542,9 +548,42 @@ public class SettingsActivity extends AppCompatActivity {
         return labels;
     }
 
+    private String[] mapScriptLabels() {
+        String[] labels = new String[scriptOptions.size()];
+        for (int i = 0; i < scriptOptions.size(); i++) {
+            labels[i] = scriptOptions.get(i).label;
+        }
+        return labels;
+    }
+
+    private void applyDuplicateLabels() {
+        java.util.Map<String, Integer> counts = new java.util.HashMap<>();
+        for (ScriptOption option : scriptOptions) {
+            counts.put(option.label, counts.getOrDefault(option.label, 0) + 1);
+        }
+        for (ScriptOption option : scriptOptions) {
+            if (counts.getOrDefault(option.label, 0) > 1 && option.scriptId != null) {
+                option.label = option.label + " (" + option.scriptId + ")";
+            }
+        }
+    }
+
+    private String resolveScriptId(String label) {
+        if (label == null || label.trim().isEmpty() || getString(R.string.no_scripts).equals(label)) {
+            return null;
+        }
+        for (ScriptOption option : scriptOptions) {
+            if (option.label.equals(label)) {
+                return option.scriptId;
+            }
+        }
+        return label;
+    }
+
     private void onActionChanged(String actionLabel) {
         String action = resolveActionValue(actionLabel);
-        String scriptId = scriptDropdown.getText() == null ? "" : scriptDropdown.getText().toString();
+        String scriptLabel = scriptDropdown.getText() == null ? "" : scriptDropdown.getText().toString();
+        String scriptId = resolveScriptId(scriptLabel);
         ScriptInfo info = scriptManager.getScriptInfo(scriptId);
         updatePlatformOptions(info, action);
     }
@@ -561,6 +600,16 @@ public class SettingsActivity extends AppCompatActivity {
             return Integer.parseInt(value.trim());
         } catch (Exception e) {
             return fallback;
+        }
+    }
+
+    private static class ScriptOption {
+        final String scriptId;
+        String label;
+
+        ScriptOption(String scriptId, String label) {
+            this.scriptId = scriptId;
+            this.label = label == null ? "" : label;
         }
     }
 

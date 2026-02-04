@@ -31,10 +31,12 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
     private final Gson gson = new Gson();
     private final Map<String, ScriptContext> scripts = new ConcurrentHashMap<>();
     private final Map<String, ScriptInfo> scriptInfos = new ConcurrentHashMap<>();
+    private final Map<String, ScriptMeta> scriptMetas = new ConcurrentHashMap<>();
     private final Map<String, List<ScriptHandler>> sourceMap = new ConcurrentHashMap<>();
     private final Map<String, Integer> sourceIndex = new ConcurrentHashMap<>();
     private final HttpClient httpClient = new HttpClient();
     private final List<ScriptChangeListener> changeListeners = new CopyOnWriteArrayList<>();
+    private final List<UpdateAlertListener> updateAlertListeners = new CopyOnWriteArrayList<>();
     private static final int LOG_LIMIT = 2000;
 
     public interface ImportCallback {
@@ -44,6 +46,17 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
 
     public interface ScriptChangeListener {
         void onScriptsChanged();
+    }
+
+    public interface UpdateAlertListener {
+        void onUpdateAlert(UpdateAlert alert);
+    }
+
+    public static class UpdateAlert {
+        public String scriptId;
+        public String name;
+        public String log;
+        public String updateUrl;
     }
 
     public ScriptManager(Context context) {
@@ -62,6 +75,7 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
     public void loadScripts() {
         scripts.clear();
         scriptInfos.clear();
+        scriptMetas.clear();
         sourceMap.clear();
         sourceIndex.clear();
         List<File> files = listScriptFilesInternal();
@@ -75,9 +89,23 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
         return new ArrayList<>(scripts.keySet());
     }
 
+    public List<ScriptEntry> getLoadedScripts() {
+        List<ScriptEntry> entries = new ArrayList<>();
+        for (String scriptId : scripts.keySet()) {
+            String name = resolveScriptName(scriptId);
+            entries.add(new ScriptEntry(scriptId, name));
+        }
+        return entries;
+    }
+
     public ScriptInfo getScriptInfo(String scriptId) {
         if (scriptId == null) return null;
         return scriptInfos.get(scriptId);
+    }
+
+    public ScriptMeta getScriptMeta(String scriptId) {
+        if (scriptId == null) return null;
+        return scriptMetas.get(scriptId);
     }
 
     public void addChangeListener(ScriptChangeListener listener) {
@@ -89,6 +117,18 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
     public void removeChangeListener(ScriptChangeListener listener) {
         if (listener != null) {
             changeListeners.remove(listener);
+        }
+    }
+
+    public void addUpdateAlertListener(UpdateAlertListener listener) {
+        if (listener != null) {
+            updateAlertListeners.add(listener);
+        }
+    }
+
+    public void removeUpdateAlertListener(UpdateAlertListener listener) {
+        if (listener != null) {
+            updateAlertListeners.remove(listener);
         }
     }
 
@@ -181,6 +221,7 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
             context.close();
         }
         scriptInfos.remove(scriptId);
+        scriptMetas.remove(scriptId);
         File target = new File(scriptsDir, scriptId);
         return target.exists() && target.delete();
     }
@@ -376,6 +417,8 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
     @Override
     public void onUpdateAlert(String scriptId, String dataJson) {
         Logger.info("[Alert] " + scriptId + ": " + dataJson);
+        UpdateAlert alert = parseUpdateAlert(scriptId, dataJson);
+        notifyUpdateAlert(alert);
     }
 
     private void registerSources(String scriptId, ScriptContext context, ScriptInfo info) {
@@ -400,12 +443,14 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
 
         try {
             ScriptMeta meta = parseMeta(scriptContent, file.getName());
+            scriptMetas.put(scriptId, meta);
             scripts.put(scriptId, context);
             context.initialize(meta, preloadScript, scriptContent, nativeImpl);
             Logger.info("Loaded script: " + scriptId);
         } catch (Exception e) {
             Logger.error("Failed to load script: " + scriptId, e);
             scripts.remove(scriptId);
+            scriptMetas.remove(scriptId);
             context.close();
         }
     }
@@ -482,6 +527,69 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
             } catch (Exception e) {
                 Logger.warn("Script change listener failed: " + e.getMessage());
             }
+        }
+    }
+
+    private void notifyUpdateAlert(UpdateAlert alert) {
+        if (alert == null) return;
+        for (UpdateAlertListener listener : updateAlertListeners) {
+            try {
+                listener.onUpdateAlert(alert);
+            } catch (Exception e) {
+                Logger.warn("Update alert listener failed: " + e.getMessage());
+            }
+        }
+    }
+
+    private UpdateAlert parseUpdateAlert(String scriptId, String dataJson) {
+        UpdateAlert alert = null;
+        try {
+            alert = gson.fromJson(dataJson, UpdateAlert.class);
+        } catch (Exception ignored) {
+        }
+        if (alert == null) {
+            alert = new UpdateAlert();
+            alert.log = dataJson;
+        }
+        alert.scriptId = scriptId;
+        if (alert.name == null || alert.name.trim().isEmpty()) {
+            ScriptMeta meta = scriptMetas.get(scriptId);
+            if (meta != null && meta.getName() != null && !meta.getName().trim().isEmpty()) {
+                alert.name = meta.getName().trim();
+            }
+        }
+        if (alert.log != null && alert.log.length() > 1024) {
+            alert.log = alert.log.substring(0, 1024) + "...";
+        }
+        return alert;
+    }
+
+    private String resolveScriptName(String scriptId) {
+        ScriptMeta meta = scriptMetas.get(scriptId);
+        if (meta != null) {
+            String name = meta.getName();
+            if (name != null && !name.trim().isEmpty()) {
+                return name.trim();
+            }
+        }
+        return scriptId;
+    }
+
+    public static class ScriptEntry {
+        private final String scriptId;
+        private final String displayName;
+
+        public ScriptEntry(String scriptId, String displayName) {
+            this.scriptId = scriptId;
+            this.displayName = displayName;
+        }
+
+        public String getScriptId() {
+            return scriptId;
+        }
+
+        public String getDisplayName() {
+            return displayName;
         }
     }
 

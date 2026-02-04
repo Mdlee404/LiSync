@@ -40,7 +40,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView lastUpdatedText;
     private TextView deviceStatusText;
     private AutoCompleteTextView scriptDropdown;
-    private final java.util.List<String> scriptOptions = new java.util.ArrayList<>();
+    private final java.util.List<ScriptOption> scriptOptions = new java.util.ArrayList<>();
     private ActivityResultLauncher<String[]> importLauncher;
     private ActivityResultLauncher<String[]> uploadLauncher;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -48,6 +48,7 @@ public class MainActivity extends AppCompatActivity {
     private final Runnable deviceStatusRefreshDelayed = this::updateDeviceStatus;
     private boolean serviceDialogShown = false;
     private boolean deviceDialogShown = false;
+    private String lastSelectedScriptId;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,6 +65,11 @@ public class MainActivity extends AppCompatActivity {
         lastUpdatedText = findViewById(R.id.text_last_updated);
         deviceStatusText = findViewById(R.id.text_device_status);
         scriptDropdown = findViewById(R.id.dropdown_script_home);
+        scriptDropdown.setOnItemClickListener((parent, view, position, id) -> {
+            if (position >= 0 && position < scriptOptions.size()) {
+                lastSelectedScriptId = scriptOptions.get(position).scriptId;
+            }
+        });
 
         MaterialButton refreshButton = findViewById(R.id.button_refresh);
         MaterialButton clearCacheButton = findViewById(R.id.button_clear_cache);
@@ -116,15 +122,19 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshData() {
+        refreshData(null);
+    }
+
+    private void refreshData(String preferredScriptId) {
         executor.execute(() -> {
             List<CacheEntry> entries = cacheManager.list();
-            List<String> loadedIds = scriptManager.getLoadedScriptIds();
+            List<ScriptManager.ScriptEntry> loadedScripts = scriptManager.getLoadedScripts();
             String lastUpdated = getString(R.string.updated_at, DateFormat.getDateTimeInstance().format(new Date()));
             runOnUiThread(() -> {
-                scriptCountText.setText(String.valueOf(loadedIds.size()));
+                scriptCountText.setText(String.valueOf(loadedScripts.size()));
                 cacheCountText.setText(String.valueOf(entries.size()));
                 lastUpdatedText.setText(lastUpdated);
-                updateScriptDropdown(loadedIds);
+                updateScriptDropdown(loadedScripts, preferredScriptId);
                 updateDeviceStatus();
             });
         });
@@ -286,19 +296,26 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
-    private void updateScriptDropdown(List<String> scriptIds) {
+    private void updateScriptDropdown(List<ScriptManager.ScriptEntry> scripts, String preferredScriptId) {
         scriptOptions.clear();
-        if (scriptIds != null) {
-            scriptOptions.addAll(scriptIds);
+        if (scripts != null) {
+            for (ScriptManager.ScriptEntry entry : scripts) {
+                if (entry == null) continue;
+                scriptOptions.add(new ScriptOption(entry.getScriptId(), entry.getDisplayName()));
+            }
         }
         if (scriptOptions.isEmpty()) {
-            scriptOptions.add(getString(R.string.no_scripts));
+            scriptOptions.add(new ScriptOption(null, getString(R.string.no_scripts)));
+        } else {
+            applyDuplicateLabels();
         }
         ArrayAdapter<String> scriptAdapter = new ArrayAdapter<>(this,
                 android.R.layout.simple_list_item_1,
-                scriptOptions);
+                mapScriptLabels());
         scriptDropdown.setAdapter(scriptAdapter);
-        scriptDropdown.setText(scriptOptions.get(0), false);
+        ScriptOption selected = resolvePreferredScript(preferredScriptId);
+        scriptDropdown.setText(selected.label, false);
+        lastSelectedScriptId = selected.scriptId;
     }
 
     private String getSelectedScriptId() {
@@ -306,6 +323,11 @@ public class MainActivity extends AppCompatActivity {
         if (scriptLabel.isEmpty() || getString(R.string.no_scripts).equals(scriptLabel)) {
             Toast.makeText(this, getString(R.string.prompt_import_first), Toast.LENGTH_SHORT).show();
             return null;
+        }
+        for (ScriptOption option : scriptOptions) {
+            if (option.label.equals(scriptLabel)) {
+                return option.scriptId;
+            }
         }
         return scriptLabel;
     }
@@ -333,8 +355,7 @@ public class MainActivity extends AppCompatActivity {
                         if (renamed != null) {
                             scriptManager.loadScripts();
                             runOnUiThread(() -> {
-                                refreshData();
-                                scriptDropdown.setText(renamed, false);
+                                refreshData(renamed);
                                 Toast.makeText(this, getString(R.string.script_op_success), Toast.LENGTH_SHORT).show();
                             });
                         } else {
@@ -377,7 +398,7 @@ public class MainActivity extends AppCompatActivity {
                         if (ok) {
                             scriptManager.loadScripts();
                             runOnUiThread(() -> {
-                                refreshData();
+                                refreshData(scriptId);
                                 Toast.makeText(this, getString(R.string.script_op_success), Toast.LENGTH_SHORT).show();
                             });
                         } else {
@@ -401,7 +422,7 @@ public class MainActivity extends AppCompatActivity {
                         if (ok) {
                             scriptManager.loadScripts();
                             runOnUiThread(() -> {
-                                refreshData();
+                                refreshData(null);
                                 Toast.makeText(this, getString(R.string.script_op_success), Toast.LENGTH_SHORT).show();
                             });
                         } else {
@@ -411,6 +432,48 @@ public class MainActivity extends AppCompatActivity {
                 })
                 .setNegativeButton(getString(R.string.cancel_button), null)
                 .show();
+    }
+
+    private void applyDuplicateLabels() {
+        java.util.Map<String, Integer> counts = new java.util.HashMap<>();
+        for (ScriptOption option : scriptOptions) {
+            counts.put(option.label, counts.getOrDefault(option.label, 0) + 1);
+        }
+        for (ScriptOption option : scriptOptions) {
+            if (counts.getOrDefault(option.label, 0) > 1 && option.scriptId != null) {
+                option.label = option.label + " (" + option.scriptId + ")";
+            }
+        }
+    }
+
+    private ScriptOption resolvePreferredScript(String preferredScriptId) {
+        String targetId = preferredScriptId == null ? lastSelectedScriptId : preferredScriptId;
+        if (targetId != null) {
+            for (ScriptOption option : scriptOptions) {
+                if (targetId.equals(option.scriptId)) {
+                    return option;
+                }
+            }
+        }
+        return scriptOptions.get(0);
+    }
+
+    private String[] mapScriptLabels() {
+        String[] labels = new String[scriptOptions.size()];
+        for (int i = 0; i < scriptOptions.size(); i++) {
+            labels[i] = scriptOptions.get(i).label;
+        }
+        return labels;
+    }
+
+    private static class ScriptOption {
+        final String scriptId;
+        String label;
+
+        ScriptOption(String scriptId, String label) {
+            this.scriptId = scriptId;
+            this.label = label == null ? "" : label;
+        }
     }
 }
 
