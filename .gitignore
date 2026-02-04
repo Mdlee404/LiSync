@@ -44,5 +44,11 @@ Thumbs.db
 !**/Readme.md
 !**/readme.md
 
+# Track project docs under docs/
+!docs/
+!docs/**/
+!docs/**/*.md
+!docs/**/*.txt
+
 # Local-only upstream reference
 /lx-music-mobile/

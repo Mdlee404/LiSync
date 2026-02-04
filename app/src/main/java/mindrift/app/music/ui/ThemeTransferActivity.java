@@ -12,8 +12,15 @@ import com.google.android.material.button.MaterialButton;
 import com.google.android.material.progressindicator.LinearProgressIndicator;
 import com.google.android.material.switchmaterial.SwitchMaterial;
 import com.google.android.material.textfield.TextInputEditText;
+import java.io.BufferedInputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.Locale;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import mindrift.app.music.App;
 import mindrift.app.music.R;
 import mindrift.app.music.wearable.XiaomiWearableManager;
@@ -21,7 +28,7 @@ import mindrift.app.music.wearable.XiaomiWearableManager;
 public class ThemeTransferActivity extends AppCompatActivity {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private XiaomiWearableManager wearableManager;
-    private ActivityResultLauncher<Uri> pickLauncher;
+    private ActivityResultLauncher<String[]> pickLauncher;
     private TextView pathText;
     private TextView nameText;
     private TextView summaryText;
@@ -35,6 +42,8 @@ public class ThemeTransferActivity extends AppCompatActivity {
     private MaterialButton startButton;
     private MaterialButton cancelButton;
     private XiaomiWearableManager.ThemeInfo currentThemeInfo;
+    private File extractedBaseDir;
+    private String currentZipLabel;
     private boolean transferInProgress = false;
 
     @Override
@@ -58,8 +67,13 @@ public class ThemeTransferActivity extends AppCompatActivity {
         startButton = findViewById(R.id.button_theme_start);
         cancelButton = findViewById(R.id.button_theme_cancel);
 
-        pickLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocumentTree(), this::handlePickResult);
-        pickButton.setOnClickListener(v -> pickLauncher.launch(null));
+        pickLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), this::handlePickResult);
+        pickButton.setOnClickListener(v -> pickLauncher.launch(new String[]{
+                "application/zip",
+                "application/x-zip-compressed",
+                "application/java-archive",
+                "application/octet-stream"
+        }));
         startButton.setOnClickListener(v -> startTransfer());
         cancelButton.setOnClickListener(v -> cancelTransfer());
 
@@ -71,26 +85,31 @@ public class ThemeTransferActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         executor.shutdown();
+        if (!transferInProgress) {
+            cleanupExtractedDir();
+        }
     }
 
     private void handlePickResult(Uri uri) {
         if (uri == null) return;
+        cleanupExtractedDir();
         try {
             getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
         } catch (Exception ignored) {
         }
         String label = uri.toString();
         try {
-            androidx.documentfile.provider.DocumentFile doc = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, uri);
+            androidx.documentfile.provider.DocumentFile doc = androidx.documentfile.provider.DocumentFile.fromSingleUri(this, uri);
             if (doc != null && doc.getName() != null) {
                 label = doc.getName();
             }
         } catch (Exception ignored) {
         }
+        currentZipLabel = label;
         pathText.setText(label);
         nameText.setText(getString(R.string.theme_transfer_name_placeholder));
         summaryText.setText(getString(R.string.theme_transfer_summary_placeholder));
-        updateStatus(getString(R.string.theme_transfer_status_preparing));
+        updateStatus(getString(R.string.theme_transfer_status_extracting));
         progressIndicator.setProgressCompat(0, false);
         progressText.setText(getString(R.string.theme_transfer_progress_format, 0, 0, 0));
         currentThemeInfo = null;
@@ -98,8 +117,14 @@ public class ThemeTransferActivity extends AppCompatActivity {
 
         executor.execute(() -> {
             try {
-                XiaomiWearableManager.ThemeInfo info = wearableManager.inspectTheme(uri);
-                runOnUiThread(() -> applyThemeInfo(info));
+                File rootDir = extractZipToPrivate(uri);
+                XiaomiWearableManager.ThemeInfo info = wearableManager.inspectTheme(rootDir);
+                runOnUiThread(() -> {
+                    if (rootDir != null) {
+                        pathText.setText(currentZipLabel == null ? rootDir.getName() : currentZipLabel);
+                    }
+                    applyThemeInfo(info);
+                });
             } catch (XiaomiWearableManager.ThemeTransferException e) {
                 runOnUiThread(() -> showError(getString(R.string.theme_transfer_status_failed, e.getMessage())));
             } catch (Exception e) {
@@ -111,6 +136,9 @@ public class ThemeTransferActivity extends AppCompatActivity {
     private void applyThemeInfo(XiaomiWearableManager.ThemeInfo info) {
         currentThemeInfo = info;
         String themeId = info == null ? "" : info.getThemeId();
+        if (themeId != null) {
+            themeId = themeId.trim().toLowerCase(Locale.US);
+        }
         themeIdInput.setText(themeId == null ? "" : themeId);
         String name = info == null ? "" : info.getThemeName();
         if (name == null || name.trim().isEmpty()) {
@@ -137,6 +165,10 @@ public class ThemeTransferActivity extends AppCompatActivity {
             return;
         }
         String themeId = themeIdInput.getText() == null ? "" : themeIdInput.getText().toString().trim();
+        if (!themeId.isEmpty()) {
+            themeId = themeId.toLowerCase(Locale.US);
+            themeIdInput.setText(themeId);
+        }
         if (!XiaomiWearableManager.isValidThemeId(themeId)) {
             showError(getString(R.string.theme_transfer_invalid_id, themeId));
             return;
@@ -177,6 +209,7 @@ public class ThemeTransferActivity extends AppCompatActivity {
                     progressIndicator.setProgressCompat(100, true);
                     updateStatus(getString(R.string.theme_transfer_status_finished));
                     updateTransferState(false);
+                    cleanupExtractedDir();
                     Toast.makeText(ThemeTransferActivity.this, getString(R.string.theme_transfer_status_finished), Toast.LENGTH_SHORT).show();
                 });
             }
@@ -192,6 +225,7 @@ public class ThemeTransferActivity extends AppCompatActivity {
                         updateStatus(getString(R.string.theme_transfer_status_failed, reason));
                     }
                     updateTransferState(false);
+                    cleanupExtractedDir();
                     Toast.makeText(ThemeTransferActivity.this,
                             reason.contains("取消")
                                     ? getString(R.string.theme_transfer_status_cancelled)
@@ -236,5 +270,133 @@ public class ThemeTransferActivity extends AppCompatActivity {
             index++;
         }
         return String.format(java.util.Locale.US, "%.1f %s", value, units[index]);
+    }
+
+    private File extractZipToPrivate(Uri uri) throws Exception {
+        if (uri == null) {
+            throw new Exception(getString(R.string.theme_transfer_zip_missing));
+        }
+        File baseDir = new File(getFilesDir(), "theme_imports");
+        if (!baseDir.exists() && !baseDir.mkdirs()) {
+            throw new Exception(getString(R.string.theme_transfer_extract_failed, "create dir failed"));
+        }
+        File workDir = new File(baseDir, "theme_" + System.currentTimeMillis());
+        if (!workDir.mkdirs()) {
+            throw new Exception(getString(R.string.theme_transfer_extract_failed, "create dir failed"));
+        }
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input == null) {
+                throw new Exception(getString(R.string.theme_transfer_extract_failed, "open zip failed"));
+            }
+            try (ZipInputStream zipInput = new ZipInputStream(new BufferedInputStream(input))) {
+                ZipEntry entry;
+                byte[] buffer = new byte[8192];
+                while ((entry = zipInput.getNextEntry()) != null) {
+                    String name = entry.getName();
+                    if (name == null || name.trim().isEmpty()) {
+                        continue;
+                    }
+                    String normalized = normalizeZipEntry(name);
+                    if (normalized.isEmpty()) {
+                        continue;
+                    }
+                    if (isInvalidZipPath(normalized)) {
+                        throw new Exception(getString(R.string.theme_transfer_extract_failed, "invalid path: " + normalized));
+                    }
+                    File target = new File(workDir, normalized);
+                    String canonicalTarget = target.getCanonicalPath();
+                    String canonicalBase = workDir.getCanonicalPath() + File.separator;
+                    if (!canonicalTarget.startsWith(canonicalBase)) {
+                        throw new Exception(getString(R.string.theme_transfer_extract_failed, "invalid path: " + normalized));
+                    }
+                    if (entry.isDirectory()) {
+                        if (!target.exists() && !target.mkdirs()) {
+                            throw new Exception(getString(R.string.theme_transfer_extract_failed, "create dir failed"));
+                        }
+                        continue;
+                    }
+                    File parent = target.getParentFile();
+                    if (parent != null && !parent.exists() && !parent.mkdirs()) {
+                        throw new Exception(getString(R.string.theme_transfer_extract_failed, "create dir failed"));
+                    }
+                    try (FileOutputStream output = new FileOutputStream(target)) {
+                        int read;
+                        while ((read = zipInput.read(buffer)) != -1) {
+                            output.write(buffer, 0, read);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            deleteRecursively(workDir);
+            throw new Exception(getString(R.string.theme_transfer_extract_failed, e.getMessage()));
+        }
+        File themeRoot = resolveThemeRoot(workDir);
+        if (themeRoot == null) {
+            deleteRecursively(workDir);
+            throw new Exception(getString(R.string.theme_transfer_extract_failed, "theme.json missing"));
+        }
+        extractedBaseDir = workDir;
+        return themeRoot;
+    }
+
+    private File resolveThemeRoot(File baseDir) {
+        if (baseDir == null || !baseDir.isDirectory()) return null;
+        File directTheme = new File(baseDir, "theme.json");
+        if (directTheme.exists() && directTheme.isFile()) {
+            return baseDir;
+        }
+        File[] children = baseDir.listFiles();
+        if (children == null) return null;
+        File candidate = null;
+        for (File child : children) {
+            if (child != null && child.isDirectory()) {
+                File themeJson = new File(child, "theme.json");
+                if (themeJson.exists() && themeJson.isFile()) {
+                    if (candidate != null) {
+                        return null;
+                    }
+                    candidate = child;
+                }
+            }
+        }
+        return candidate;
+    }
+
+    private void cleanupExtractedDir() {
+        if (extractedBaseDir == null) return;
+        deleteRecursively(extractedBaseDir);
+        extractedBaseDir = null;
+    }
+
+    private void deleteRecursively(File file) {
+        if (file == null || !file.exists()) return;
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deleteRecursively(child);
+                }
+            }
+        }
+        file.delete();
+    }
+
+    private String normalizeZipEntry(String name) {
+        String normalized = name.replace("\\", "/");
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        return normalized.trim();
+    }
+
+    private boolean isInvalidZipPath(String path) {
+        if (path == null || path.trim().isEmpty()) return true;
+        String value = path.trim();
+        if (value.startsWith("/") || value.startsWith("\\") || value.startsWith("internal://")) return true;
+        return value.contains("..");
     }
 }

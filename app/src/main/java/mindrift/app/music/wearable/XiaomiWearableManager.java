@@ -23,6 +23,8 @@ import com.xiaomi.xms.wearable.service.ServiceApi;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageInfo;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -1172,7 +1174,19 @@ public class XiaomiWearableManager {
     }
 
     public ThemeInfo inspectTheme(Uri treeUri) throws ThemeTransferException {
-        return buildThemeInfo(treeUri);
+        if (treeUri == null) {
+            throw new ThemeTransferException("未选择主题目录");
+        }
+        DocumentFile root = DocumentFile.fromTreeUri(context, treeUri);
+        return buildThemeInfo(root);
+    }
+
+    public ThemeInfo inspectTheme(File rootDir) throws ThemeTransferException {
+        if (rootDir == null) {
+            throw new ThemeTransferException("未选择主题目录");
+        }
+        DocumentFile root = DocumentFile.fromFile(rootDir);
+        return buildThemeInfo(root);
     }
 
     public void transferTheme(ThemeInfo info, ThemeTransferOptions options, ThemeTransferCallback callback) {
@@ -1196,6 +1210,9 @@ public class XiaomiWearableManager {
             }
             ThemeTransferOptions actualOptions = options == null ? new ThemeTransferOptions() : options;
             String themeId = resolveThemeId(info, actualOptions);
+            if (themeId != null) {
+                themeId = themeId.trim().toLowerCase(java.util.Locale.US);
+            }
             if (!isValidThemeId(themeId)) {
                 notifyThemeFailure(callback, "主题 ID 不合法: " + themeId);
                 return;
@@ -1335,11 +1352,7 @@ public class XiaomiWearableManager {
         sendMessage(nodeId, gson.toJson(buildThemeCancelPayload(cancelId, clean)));
     }
 
-    private ThemeInfo buildThemeInfo(Uri treeUri) throws ThemeTransferException {
-        if (treeUri == null) {
-            throw new ThemeTransferException("未选择主题目录");
-        }
-        DocumentFile root = DocumentFile.fromTreeUri(context, treeUri);
+    private ThemeInfo buildThemeInfo(DocumentFile root) throws ThemeTransferException {
         if (root == null || !root.isDirectory()) {
             throw new ThemeTransferException("无法读取主题目录");
         }
@@ -1450,7 +1463,7 @@ public class XiaomiWearableManager {
 
     private byte[] readThemeBytes(DocumentFile file) throws ThemeTransferException {
         if (file == null) return null;
-        try (InputStream input = context.getContentResolver().openInputStream(file.getUri())) {
+        try (InputStream input = openThemeInputStream(file)) {
             if (input == null) return null;
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             byte[] buffer = new byte[8192];
@@ -1501,7 +1514,7 @@ public class XiaomiWearableManager {
     private long sendThemeChunksFromStream(String nodeId, ThemeTransferSession session, ThemeFile file, String themeId,
                                            String fileId, long sentBytes, boolean useBytes, long totalBytes,
                                            int filesSent, int totalFiles, int[] lastPercent) throws ThemeTransferException {
-        try (InputStream input = context.getContentResolver().openInputStream(file.file.getUri())) {
+        try (InputStream input = openThemeInputStream(file.file)) {
             if (input == null) {
                 throw new ThemeTransferException("读取主题文件失败: " + file.path);
             }
@@ -1790,6 +1803,25 @@ public class XiaomiWearableManager {
             long length = file == null ? 0L : file.length();
             this.size = Math.max(0L, length);
             this.totalChunks = this.size > 0 ? (int) ((this.size + (THEME_CHUNK_SIZE - 1)) / THEME_CHUNK_SIZE) : 1;
+        }
+    }
+
+    private InputStream openThemeInputStream(DocumentFile file) throws ThemeTransferException {
+        if (file == null) return null;
+        Uri uri = file.getUri();
+        if (uri == null) return null;
+        String scheme = uri.getScheme();
+        try {
+            if ("file".equalsIgnoreCase(scheme)) {
+                String path = uri.getPath();
+                if (path == null || path.trim().isEmpty()) {
+                    return null;
+                }
+                return new FileInputStream(new File(path));
+            }
+            return context.getContentResolver().openInputStream(uri);
+        } catch (Exception e) {
+            throw new ThemeTransferException("读取主题文件失败: " + e.getMessage());
         }
     }
 
