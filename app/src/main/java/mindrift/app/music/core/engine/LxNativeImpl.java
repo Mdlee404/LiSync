@@ -34,6 +34,7 @@ public class LxNativeImpl implements LxNativeInterface {
     private final ScriptEventListener eventListener;
     private final Handler timeoutHandler = new Handler(Looper.getMainLooper());
     private final Map<String, Call> pendingRequests = new ConcurrentHashMap<>();
+    private volatile boolean closed = false;
     private static final int LOG_LIMIT = 2000;
 
     public interface ScriptEventListener {
@@ -47,18 +48,32 @@ public class LxNativeImpl implements LxNativeInterface {
         this.eventListener = eventListener;
     }
 
+    public void shutdown() {
+        closed = true;
+        timeoutHandler.removeCallbacksAndMessages(null);
+        for (Call call : pendingRequests.values()) {
+            try {
+                call.cancel();
+            } catch (Exception ignored) {
+            }
+        }
+        pendingRequests.clear();
+        httpClient.shutdown();
+    }
+
     @JavascriptInterface
     public String nativeCall(String key, String action, String dataJson) {
         if (key == null || !key.equals(scriptContext.getNativeKey())) {
             return "Invalid key";
         }
         if (action == null) return "Invalid action";
+        if (closed) {
+            Logger.warn("Native call ignored (closed): " + action);
+            return "Native closed";
+        }
         if ("response".equals(action) || "request".equals(action) || "init".equals(action)) {
             int size = dataJson == null ? 0 : dataJson.length();
             Logger.info("[NativeCall] action=" + action + " size=" + size);
-            if ("request".equals(action) || "response".equals(action)) {
-                Logger.info("[NativeCall] payload=" + trimLog(dataJson));
-            }
         }
         switch (action) {
             case "init":
@@ -118,9 +133,16 @@ public class LxNativeImpl implements LxNativeInterface {
 
     @JavascriptInterface
     public void request(String url, String optionsJson, String callbackId) {
+        if (closed) {
+            Logger.warn("HTTP request ignored (native closed): url=" + url);
+            Map<String, Object> error = new HashMap<>();
+            error.put("message", "Native closed");
+            invokeJsCallback(callbackId, gson.toJson(error), null);
+            return;
+        }
         Logger.info("HTTP request start: url=" + url + " callbackId=" + callbackId);
         Map<String, Object> options = parseOptions(optionsJson);
-        Logger.info("HTTP request options: " + optionsJson);
+        Logger.info("HTTP request options: " + summarizeOptions(options));
 
         httpClient.request(url, options, new HttpClient.NetworkCallback() {
             @Override
@@ -147,9 +169,17 @@ public class LxNativeImpl implements LxNativeInterface {
 
     @JavascriptInterface
     public String requestSync(String url, String optionsJson) {
+        if (closed) {
+            Logger.warn("HTTP sync request ignored (native closed): url=" + url);
+            Map<String, Object> wrapper = new HashMap<>();
+            Map<String, Object> error = new HashMap<>();
+            error.put("message", "Native closed");
+            wrapper.put("err", error);
+            return gson.toJson(wrapper);
+        }
         Logger.info("HTTP request sync start: url=" + url);
         Map<String, Object> options = parseOptions(optionsJson);
-        Logger.info("HTTP request sync options: " + optionsJson);
+        Logger.info("HTTP request sync options: " + summarizeOptions(options));
         Map<String, Object> wrapper = new HashMap<>();
         try {
             HttpClient.ResponseData responseData = httpClient.requestSync(url, options);
@@ -195,6 +225,7 @@ public class LxNativeImpl implements LxNativeInterface {
             sb.append(']');
             return sb.toString();
         } catch (Exception e) {
+            Logger.warn("Base64 to buffer failed: " + e.getMessage());
             return "[]";
         }
     }
@@ -206,6 +237,7 @@ public class LxNativeImpl implements LxNativeInterface {
             String decoded = URLDecoder.decode(input, StandardCharsets.UTF_8.name());
             return CryptoUtils.md5(decoded);
         } catch (Exception e) {
+            Logger.warn("MD5 encode failed: " + e.getMessage());
             return "";
         }
     }
@@ -229,6 +261,7 @@ public class LxNativeImpl implements LxNativeInterface {
             byte[] encrypted = cipher.doFinal(dataBytes);
             return Base64.encodeToString(encrypted, Base64.NO_WRAP);
         } catch (Exception e) {
+            Logger.warn("AES encrypt failed: " + e.getMessage());
             return "";
         }
     }
@@ -245,6 +278,7 @@ public class LxNativeImpl implements LxNativeInterface {
             byte[] encrypted = cipher.doFinal(Base64.decode(data, Base64.DEFAULT));
             return Base64.encodeToString(encrypted, Base64.NO_WRAP);
         } catch (Exception e) {
+            Logger.warn("RSA encrypt failed: " + e.getMessage());
             return "";
         }
     }
@@ -314,6 +348,7 @@ public class LxNativeImpl implements LxNativeInterface {
             }
         } catch (Exception ignored) {
         }
+        message = trimLog(message);
 
         if ("error".equalsIgnoreCase(level)) {
             Logger.error("[JS] " + message);
@@ -378,9 +413,47 @@ public class LxNativeImpl implements LxNativeInterface {
             Map<String, Object> map = gson.fromJson(optionsJson, Map.class);
             return map != null ? map : new HashMap<>();
         } catch (Exception e) {
-            Logger.warn("Invalid request options JSON, using defaults.");
+            Logger.warn("Invalid request options JSON: " + e.getMessage());
             return new HashMap<>();
         }
+    }
+
+    private String summarizeOptions(Map<String, Object> options) {
+        if (options == null || options.isEmpty()) return "{}";
+        String method = String.valueOf(options.getOrDefault("method", "GET"));
+        int headerCount = 0;
+        Object headersObj = options.get("headers");
+        if (headersObj instanceof Map) {
+            headerCount = ((Map<?, ?>) headersObj).size();
+        }
+        int bodyLen = options.get("body") instanceof String ? ((String) options.get("body")).length() : 0;
+        int formCount = options.get("form") instanceof Map ? ((Map<?, ?>) options.get("form")).size() : 0;
+        int formDataCount = options.get("formData") instanceof Map ? ((Map<?, ?>) options.get("formData")).size() : 0;
+        Integer timeout = readTimeout(options.get("timeout"));
+        boolean binary = Boolean.TRUE.equals(options.get("binary"));
+        StringBuilder sb = new StringBuilder();
+        sb.append("method=").append(method);
+        sb.append(" headers=").append(headerCount);
+        if (bodyLen > 0) sb.append(" body=").append(bodyLen);
+        if (formCount > 0) sb.append(" form=").append(formCount);
+        if (formDataCount > 0) sb.append(" formData=").append(formDataCount);
+        if (timeout != null) sb.append(" timeout=").append(timeout);
+        if (binary) sb.append(" binary");
+        return sb.toString();
+    }
+
+    private Integer readTimeout(Object timeoutObj) {
+        if (timeoutObj instanceof Number) {
+            return ((Number) timeoutObj).intValue();
+        }
+        if (timeoutObj instanceof String) {
+            try {
+                return Integer.parseInt((String) timeoutObj);
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private Object parseBody(String body) {
@@ -479,7 +552,16 @@ public class LxNativeImpl implements LxNativeInterface {
                 options.putAll((Map<String, Object>) optionsObj);
             }
             maybeInjectSourceForCompat(url, options);
-            Logger.info("Script request start: key=" + requestKey + " url=" + url + " options=" + trimLog(gson.toJson(options)));
+            if (closed) {
+                Logger.warn("Script request ignored (native closed): key=" + requestKey);
+                Map<String, Object> wrapper = new HashMap<>();
+                wrapper.put("requestKey", requestKey);
+                wrapper.put("error", "Native closed");
+                wrapper.put("response", null);
+                sendNativeEvent("response", gson.toJson(wrapper));
+                return;
+            }
+            Logger.info("Script request start: key=" + requestKey + " url=" + url + " " + summarizeOptions(options));
             Call call = httpClient.requestWithCall(url, options, new HttpClient.NetworkCallback() {
                 @Override
                 public void onSuccess(int code, String body, Map<String, String> headers) {
@@ -616,6 +698,7 @@ public class LxNativeImpl implements LxNativeInterface {
         try {
             return Base64.decode(base64, Base64.DEFAULT);
         } catch (Exception e) {
+            Logger.warn("Base64 decode failed: " + e.getMessage());
             return new byte[0];
         }
     }
@@ -644,11 +727,19 @@ public class LxNativeImpl implements LxNativeInterface {
     private byte[] fromHex(String hex) {
         if (hex == null) return new byte[0];
         int len = hex.length();
-        if (len % 2 != 0) return new byte[0];
+        if (len % 2 != 0) {
+            Logger.warn("Hex decode failed: invalid length=" + len);
+            return new byte[0];
+        }
         byte[] data = new byte[len / 2];
         for (int i = 0; i < len; i += 2) {
-            data[i / 2] = (byte) ((Character.digit(hex.charAt(i), 16) << 4)
-                    + Character.digit(hex.charAt(i + 1), 16));
+            int hi = Character.digit(hex.charAt(i), 16);
+            int lo = Character.digit(hex.charAt(i + 1), 16);
+            if (hi < 0 || lo < 0) {
+                Logger.warn("Hex decode failed: invalid hex char");
+                return new byte[0];
+            }
+            data[i / 2] = (byte) ((hi << 4) + lo);
         }
         return data;
     }

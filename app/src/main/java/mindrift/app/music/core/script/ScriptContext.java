@@ -8,6 +8,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import mindrift.app.music.core.engine.LxNativeImpl;
 import mindrift.app.music.utils.Logger;
@@ -18,6 +19,7 @@ public class ScriptContext {
     private final ExecutorService executor;
     private final CountDownLatch initLatch;
     private QuickJSContext jsContext;
+    private LxNativeImpl nativeImpl;
     private final ConcurrentHashMap<String, ArrayBlockingQueue<String>> asyncResults = new ConcurrentHashMap<>();
 
     // ????????????
@@ -43,6 +45,7 @@ public class ScriptContext {
     }
 
     public void initialize(ScriptMeta meta, String preloadScript, String scriptContent, LxNativeImpl nativeImpl) throws Exception {
+        this.nativeImpl = nativeImpl;
         Future<?> future = executor.submit(() -> {
             try {
                 QuickJSLoader.init();
@@ -64,19 +67,30 @@ public class ScriptContext {
     }
 
     public void evaluateAsync(String script) {
-        executor.submit(() -> {
-            awaitInit();
-            try {
-                if (jsContext != null) {
-                    jsContext.evaluate(script);
+        if (executor.isShutdown()) {
+            Logger.warn("Script context closed, ignore async eval: " + scriptId);
+            return;
+        }
+        try {
+            executor.submit(() -> {
+                awaitInit();
+                try {
+                    if (jsContext != null) {
+                        jsContext.evaluate(script);
+                    }
+                } catch (Exception e) {
+                    Logger.error("Script execution error: " + e.getMessage(), e);
                 }
-            } catch (Exception e) {
-                Logger.error("Script execution error: " + e.getMessage(), e);
-            }
-        });
+            });
+        } catch (RejectedExecutionException e) {
+            Logger.warn("Script context rejected async eval: " + scriptId);
+        }
     }
 
     public <T> T evaluate(String script, Class<T> type) throws Exception {
+        if (executor.isShutdown()) {
+            throw new Exception("Script context closed");
+        }
         Future<T> future = executor.submit(() -> {
             awaitInit();
             Object result = jsContext == null ? null : jsContext.evaluate(script);
@@ -123,13 +137,23 @@ public class ScriptContext {
     }
 
     public void close() {
-        executor.submit(() -> {
-            awaitInit();
-            if (jsContext != null) {
-                jsContext.destroy();
-                jsContext = null;
+        if (nativeImpl != null) {
+            nativeImpl.shutdown();
+            nativeImpl = null;
+        }
+        if (!executor.isShutdown()) {
+            try {
+                executor.submit(() -> {
+                    awaitInit();
+                    if (jsContext != null) {
+                        jsContext.destroy();
+                        jsContext = null;
+                    }
+                });
+            } catch (RejectedExecutionException e) {
+                Logger.warn("Script context rejected close task: " + scriptId);
             }
-        });
+        }
         asyncResults.clear();
         executor.shutdown();
     }

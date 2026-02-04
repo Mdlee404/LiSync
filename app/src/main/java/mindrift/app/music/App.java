@@ -28,6 +28,7 @@ public class App extends Application {
     private final Object alertLock = new Object();
     private WeakReference<Activity> currentActivity = new WeakReference<>(null);
     private boolean alertShowing = false;
+    private volatile boolean shuttingDown = false;
 
     @Override
     public void onCreate() {
@@ -41,6 +42,12 @@ public class App extends Application {
         scriptManager.addUpdateAlertListener(this::handleUpdateAlert);
         registerActivityLifecycleCallbacks(activityCallbacks);
         wearableManager.start();
+    }
+
+    @Override
+    public void onTerminate() {
+        super.onTerminate();
+        shutdown();
     }
 
     private final ActivityLifecycleCallbacks activityCallbacks = new ActivityLifecycleCallbacks() {
@@ -125,6 +132,32 @@ public class App extends Application {
             activity.startActivity(intent);
         } catch (Exception e) {
             Logger.warn("Open update url failed: " + e.getMessage());
+        }
+    }
+
+    public void shutdown() {
+        if (shuttingDown) return;
+        shuttingDown = true;
+        try {
+            unregisterActivityLifecycleCallbacks(activityCallbacks);
+        } catch (Exception ignored) {
+        }
+        mainHandler.removeCallbacksAndMessages(null);
+        synchronized (alertLock) {
+            pendingAlerts.clear();
+            alertShowing = false;
+        }
+        if (wearableManager != null) {
+            wearableManager.stop();
+        }
+        if (requestProxy != null) {
+            requestProxy.shutdown();
+        }
+        if (scriptManager != null) {
+            scriptManager.shutdown();
+        }
+        if (cacheManager != null) {
+            cacheManager.shutdown();
         }
     }
 

@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Set;
 import mindrift.app.music.core.network.HttpClient;
 import mindrift.app.music.utils.Logger;
+import mindrift.app.music.utils.PlatformUtils;
 
 public class SearchService {
     private static final int DEFAULT_PAGE_SIZE = 20;
@@ -28,14 +29,15 @@ public class SearchService {
     };
 
     public SearchResult search(String platform, String keyword, int page, Integer pageSize) {
+        String normalizedPlatform = PlatformUtils.normalize(platform);
         String kw = normalizeKeyword(keyword);
         if (kw.isEmpty()) {
-            return new SearchResult(platform, page, pageSize == null ? DEFAULT_PAGE_SIZE : pageSize, 0, new ArrayList<>());
+            return new SearchResult(PlatformUtils.displayName(normalizedPlatform), page, pageSize == null ? DEFAULT_PAGE_SIZE : pageSize, 0, new ArrayList<>());
         }
         int safePage = Math.max(1, page);
         int size = pageSize == null || pageSize <= 0 ? DEFAULT_PAGE_SIZE : pageSize;
 
-        List<String> platforms = buildPlatformOrder(platform);
+        List<String> platforms = buildPlatformOrder(normalizedPlatform);
         for (String source : platforms) {
             String cacheKey = "search_" + source + "_" + kw + "_p" + safePage + "_s" + size;
             SearchResult cached = getCached(cacheKey);
@@ -47,7 +49,7 @@ public class SearchService {
                 return result;
             }
         }
-        return new SearchResult(platform, safePage, size, 0, new ArrayList<>());
+        return new SearchResult(PlatformUtils.displayName(normalizedPlatform), safePage, size, 0, new ArrayList<>());
     }
 
     private List<String> buildPlatformOrder(String platform) {
@@ -107,12 +109,12 @@ public class SearchService {
                     String album = getString(item, "albumname");
                     Integer duration = getIntObj(item, "interval");
                     if (id != null && !id.isEmpty()) {
-                        results.add(new SearchItem("tx", id, title, artist, album, duration, null));
+                        results.add(new SearchItem(PlatformUtils.displayName("tx"), id, title, artist, album, duration, null));
                     }
                 }
             }
             int total = song != null ? getInt(song, "totalnum", getInt(song, "total", 0)) : 0;
-            return new SearchResult("tx", page, pageSize, total, results);
+            return new SearchResult(PlatformUtils.displayName("tx"), page, pageSize, total, results);
         } catch (Exception e) {
             Logger.warn("Search tx failed: " + e.getMessage());
             return null;
@@ -149,12 +151,12 @@ public class SearchService {
                         duration = duration / 1000;
                     }
                     if (id != null && !id.isEmpty()) {
-                        results.add(new SearchItem("wy", id, title, artist, album, duration, picUrl));
+                        results.add(new SearchItem(PlatformUtils.displayName("wy"), id, title, artist, album, duration, picUrl));
                     }
                 }
             }
             int total = result != null ? getInt(result, "songCount", 0) : 0;
-            return new SearchResult("wy", page, pageSize, total, results);
+            return new SearchResult(PlatformUtils.displayName("wy"), page, pageSize, total, results);
         } catch (Exception e) {
             Logger.warn("Search wy failed: " + e.getMessage());
             return null;
@@ -189,12 +191,12 @@ public class SearchService {
                         picUrl = picUrl.replace("{size}", "400");
                     }
                     if (id != null && !id.isEmpty()) {
-                        results.add(new SearchItem("kg", id, title, artist, album, duration, picUrl));
+                        results.add(new SearchItem(PlatformUtils.displayName("kg"), id, title, artist, album, duration, picUrl));
                     }
                 }
             }
             int total = data != null ? getInt(data, "total", 0) : 0;
-            return new SearchResult("kg", page, pageSize, total, results);
+            return new SearchResult(PlatformUtils.displayName("kg"), page, pageSize, total, results);
         } catch (Exception e) {
             Logger.warn("Search kg failed: " + e.getMessage());
             return null;
@@ -282,6 +284,11 @@ public class SearchService {
         CacheEntry(T value) {
             this.value = value;
         }
+    }
+
+    public void shutdown() {
+        cache.clear();
+        httpClient.shutdown();
     }
 
     public static class SearchItem {

@@ -22,6 +22,7 @@ public final class CryptoUtils {
             }
             return sb.toString();
         } catch (Exception e) {
+            Logger.warn("MD5 failed: " + e.getMessage());
             return "";
         }
     }
@@ -38,6 +39,7 @@ public final class CryptoUtils {
             }
             return cipher.doFinal(data);
         } catch (Exception e) {
+            Logger.warn("AES encrypt failed: " + e.getMessage());
             return new byte[0];
         }
     }
@@ -52,6 +54,7 @@ public final class CryptoUtils {
             cipher.init(Cipher.ENCRYPT_MODE, key);
             return cipher.doFinal(data);
         } catch (Exception e) {
+            Logger.warn("RSA encrypt failed: " + e.getMessage());
             return new byte[0];
         }
     }

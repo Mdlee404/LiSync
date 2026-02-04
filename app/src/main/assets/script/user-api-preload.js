@@ -108,6 +108,41 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
     }
     return result
   }
+  // 将字节数组编码为 latin1 字符串（binary）
+  function bytesToLatin1String(bytes) {
+    let result = ''
+    for (let i = 0; i < bytes.length; i++) {
+      result += String.fromCharCode(bytes[i] & 0xff)
+    }
+    return result
+  }
+  // 将字节数组编码为 Base64 字符串
+  function bytesToBase64(bytes) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    let output = ''
+    let i = 0
+    for (; i + 2 < bytes.length; i += 3) {
+      const n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2]
+      output += chars[(n >> 18) & 63]
+      output += chars[(n >> 12) & 63]
+      output += chars[(n >> 6) & 63]
+      output += chars[n & 63]
+    }
+    const remain = bytes.length - i
+    if (remain === 1) {
+      const n = bytes[i] << 16
+      output += chars[(n >> 18) & 63]
+      output += chars[(n >> 12) & 63]
+      output += '=='
+    } else if (remain === 2) {
+      const n = (bytes[i] << 16) | (bytes[i + 1] << 8)
+      output += chars[(n >> 18) & 63]
+      output += chars[(n >> 12) & 63]
+      output += chars[(n >> 6) & 63]
+      output += '='
+    }
+    return output
+  }
   // 将字符串编码为字节数组（UTF-8）
   function stringToBytes(inputString) {
     const bytes = []
@@ -331,6 +366,7 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
         const qualitys = supportQualitys[source]
         const actions = supportActions[source]
         sourceInfo.sources[source] = {
+          name: typeof userSource.name === 'string' ? userSource.name : undefined,
           type: 'music',
           actions: actions.filter(a => userSource.actions.includes(a)),
           qualitys: qualitys.filter(q => userSource.qualitys.includes(q)),
@@ -397,7 +433,11 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
         if (typeof input === 'string') {
           switch (encoding) {
             case 'binary':
-              throw new Error('Binary encoding is not supported for input strings')
+            case 'latin1': {
+              const bytes = []
+              for (let i = 0; i < input.length; i++) bytes.push(input.charCodeAt(i) & 0xff)
+              return new Uint8Array(bytes)
+            }
             case 'base64':
               return new Uint8Array(JSON.parse(nativeFuncs.utils_b642buf(input)))
             case 'hex':
@@ -416,12 +456,12 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
         if (Array.isArray(buf) || ArrayBuffer.isView(buf)) {
           switch (format) {
             case 'binary':
-              // return new TextDecoder('latin1').decode(new Uint8Array(buf))
-              return buf
+            case 'latin1':
+              return bytesToLatin1String(new Uint8Array(buf))
             case 'hex':
               return new Uint8Array(buf).reduce((str, byte) => str + byte.toString(16).padStart(2, '0'), '')
             case 'base64':
-              return nativeFuncs.utils_str2b64(bytesToString(Array.from(buf)))
+              return bytesToBase64(new Uint8Array(buf))
             case 'utf8':
             case 'utf-8':
             default:

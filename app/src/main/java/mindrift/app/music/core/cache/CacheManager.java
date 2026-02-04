@@ -61,6 +61,15 @@ public class CacheManager {
         return new ArrayList<>(cache.values());
     }
 
+    public void shutdown() {
+        try {
+            save();
+        } catch (Exception e) {
+            Logger.warn("Cache save on shutdown failed: " + e.getMessage());
+        }
+        scheduler.shutdownNow();
+    }
+
     private synchronized void cleanupExpired() {
         long now = System.currentTimeMillis();
         int removed = 0;

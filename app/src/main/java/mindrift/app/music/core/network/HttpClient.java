@@ -17,7 +17,6 @@ import okhttp3.logging.HttpLoggingInterceptor;
 
 public class HttpClient {
     private final OkHttpClient client;
-    private static final int LOG_BODY_LIMIT = 2000;
 
     public HttpClient() {
         HttpLoggingInterceptor logging = new HttpLoggingInterceptor(message -> Logger.debug("[HTTP] " + message));
@@ -145,6 +144,16 @@ public class HttpClient {
         }
     }
 
+    public void shutdown() {
+        try {
+            client.dispatcher().cancelAll();
+            client.dispatcher().executorService().shutdown();
+            client.connectionPool().evictAll();
+        } catch (Exception e) {
+            Logger.warn("HTTP client shutdown failed: " + e.getMessage());
+        }
+    }
+
     private RequestBody buildRequestBody(String body, Map<String, Object> form, Map<String, Object> formData) {
         if (body != null) {
             return RequestBody.create(body, MediaType.parse("application/json"));
@@ -165,35 +174,25 @@ public class HttpClient {
     }
 
     private void logRequest(String method, String url, Map<String, String> headers, String body, Map<String, Object> form, Map<String, Object> formData) {
-        Logger.info("HTTP -> " + method + " " + url);
-        Logger.info("HTTP -> headers: " + (headers == null ? "{}" : headers));
-        Logger.info("HTTP -> payload: " + summarizePayload(body, form, formData));
+        Logger.info("HTTP -> " + method + " " + url + " " + summarizePayload(body, form, formData));
     }
 
     private void logResponse(String method, String url, int code, Map<String, String> headers, String body) {
         int length = body == null ? 0 : body.length();
         Logger.info("HTTP <- " + code + " " + method + " " + url + " bytes=" + length);
-        Logger.info("HTTP <- headers: " + (headers == null ? "{}" : headers));
-        Logger.info("HTTP <- body(" + length + "): " + truncate(body));
     }
 
     private String summarizePayload(String body, Map<String, Object> form, Map<String, Object> formData) {
         if (body != null) {
-            return "body(" + body.length() + "): " + truncate(body);
+            return "body=" + body.length();
         }
         if (form != null) {
-            return "form: " + truncate(String.valueOf(form));
+            return "form=" + form.size();
         }
         if (formData != null) {
-            return "formData: " + truncate(String.valueOf(formData));
+            return "formData=" + formData.size();
         }
         return "body: <empty>";
-    }
-
-    private String truncate(String value) {
-        if (value == null) return "null";
-        if (value.length() <= LOG_BODY_LIMIT) return value;
-        return value.substring(0, LOG_BODY_LIMIT) + "...(+" + (value.length() - LOG_BODY_LIMIT) + " chars)";
     }
 }
 

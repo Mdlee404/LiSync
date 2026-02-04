@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import mindrift.app.music.core.network.HttpClient;
 import mindrift.app.music.utils.Logger;
+import mindrift.app.music.utils.PlatformUtils;
 
 public class LyricService {
     private static final long CACHE_EXPIRY_MS = 5 * 60 * 1000L;
@@ -27,19 +28,20 @@ public class LyricService {
     };
 
     public LyricResult getLyric(String platform, String id) {
-        if (platform == null || platform.trim().isEmpty() || id == null || id.trim().isEmpty()) {
+        String normalizedPlatform = PlatformUtils.normalize(platform);
+        if (normalizedPlatform == null || normalizedPlatform.trim().isEmpty() || id == null || id.trim().isEmpty()) {
             return empty();
         }
-        String key = "lyric_" + platform + "_" + id;
+        String key = "lyric_" + normalizedPlatform + "_" + id;
         LyricResult cached = getCached(key);
         if (cached != null) return cached;
 
         LyricResult result;
-        if ("tx".equalsIgnoreCase(platform)) {
+        if ("tx".equalsIgnoreCase(normalizedPlatform)) {
             result = fetchTencent(id);
-        } else if ("wy".equalsIgnoreCase(platform)) {
+        } else if ("wy".equalsIgnoreCase(normalizedPlatform)) {
             result = fetchNetease(id);
-        } else if ("kg".equalsIgnoreCase(platform)) {
+        } else if ("kg".equalsIgnoreCase(normalizedPlatform)) {
             result = fetchKugou(id);
         } else {
             result = empty();
@@ -193,6 +195,11 @@ public class LyricService {
         CacheEntry(T value) {
             this.value = value;
         }
+    }
+
+    public void shutdown() {
+        cache.clear();
+        httpClient.shutdown();
     }
 
     public static class LyricResult {

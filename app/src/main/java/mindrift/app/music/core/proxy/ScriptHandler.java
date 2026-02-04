@@ -2,6 +2,7 @@ package mindrift.app.music.core.proxy;
 
 import mindrift.app.music.core.script.ScriptContext;
 import mindrift.app.music.core.script.SourceInfo;
+import java.util.List;
 
 public class ScriptHandler {
     private final String scriptId;
@@ -30,6 +31,10 @@ public class ScriptHandler {
     public boolean supportsQuality(String quality) {
         if (quality == null || sourceInfo == null || sourceInfo.getQualitys() == null) return true;
         return sourceInfo.getQualitys().isEmpty() || sourceInfo.getQualitys().contains(quality);
+    }
+
+    public List<String> getQualitys() {
+        return sourceInfo == null ? null : sourceInfo.getQualitys();
     }
 }
 

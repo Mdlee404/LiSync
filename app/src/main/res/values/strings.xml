@@ -101,9 +101,9 @@
 
     <string name="clipboard_label">LiSync 日志</string>
 
-    <string name="platform_tx">腾讯 (QQ)</string>
-    <string name="platform_wy">网易云 (WY)</string>
-    <string name="platform_kg">酷狗 (KG)</string>
+    <string name="platform_tx">QQ音乐</string>
+    <string name="platform_wy">网易云音乐</string>
+    <string name="platform_kg">酷狗音乐</string>
     <string name="platform_kw">酷我 (KW)</string>
     <string name="platform_mg">咪咕 (MG)</string>
 

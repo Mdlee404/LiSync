@@ -24,6 +24,7 @@ import mindrift.app.music.core.engine.LxNativeImpl;
 import mindrift.app.music.core.network.HttpClient;
 import mindrift.app.music.core.proxy.ScriptHandler;
 import mindrift.app.music.utils.Logger;
+import mindrift.app.music.utils.PlatformUtils;
 
 public class ScriptManager implements LxNativeImpl.ScriptEventListener {
     private final File scriptsDir;
@@ -37,7 +38,6 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
     private final HttpClient httpClient = new HttpClient();
     private final List<ScriptChangeListener> changeListeners = new CopyOnWriteArrayList<>();
     private final List<UpdateAlertListener> updateAlertListeners = new CopyOnWriteArrayList<>();
-    private static final int LOG_LIMIT = 2000;
 
     public interface ImportCallback {
         void onSuccess(File file);
@@ -73,6 +73,11 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
     }
 
     public void loadScripts() {
+        for (ScriptContext context : scripts.values()) {
+            if (context != null) {
+                context.close();
+            }
+        }
         scripts.clear();
         scriptInfos.clear();
         scriptMetas.clear();
@@ -160,12 +165,15 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
             if (!orderedSources.contains(key)) orderedSources.add(key);
         }
         Map<String, List<String>> qualityMap = new LinkedHashMap<>();
+        List<String> displaySources = new ArrayList<>();
         for (String source : orderedSources) {
             Set<String> list = qualities.get(source);
-            qualityMap.put(source, list == null ? new ArrayList<>() : new ArrayList<>(list));
+            String display = PlatformUtils.displayName(source);
+            displaySources.add(display);
+            qualityMap.put(display, list == null ? new ArrayList<>() : new ArrayList<>(list));
         }
         Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("platforms", orderedSources);
+        summary.put("platforms", displaySources);
         summary.put("qualities", qualityMap);
         summary.put("actions", Collections.singletonList("musicUrl"));
         return summary;
@@ -364,14 +372,13 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
                 + ", "
                 + toJsStringLiteral(gson.toJson(payload))
                 + ");";
-        Logger.info("Dispatch request to script: " + scriptId + " key=" + requestKey);
-        Logger.info("Dispatch payload: " + trimLog(requestJson));
+        Logger.info("Dispatch request to script: " + scriptId + " key=" + requestKey + " bytes=" + (requestJson == null ? 0 : requestJson.length()));
         context.prepareAsyncResult(requestKey);
         context.evaluateAsync(js);
 
         try {
             String responseJson = context.awaitAsyncResult(requestKey, timeoutMs);
-            Logger.info("Dispatch result: " + (responseJson == null ? "null" : responseJson));
+            Logger.info("Dispatch result: " + (responseJson == null ? "null" : ("bytes=" + responseJson.length())));
             if (responseJson == null || responseJson.isEmpty()) {
                 return errorJson("Empty response");
             }
@@ -403,12 +410,12 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
         ScriptContext context = scripts.get(scriptId);
         if (context == null) return;
         try {
-            Logger.info("Script init data: " + trimLog(dataJson));
             ScriptInfo info = gson.fromJson(dataJson, ScriptInfo.class);
             context.setScriptInfo(info);
             scriptInfos.put(scriptId, info);
             registerSources(scriptId, context, info);
-            Logger.info("Script sources registered: " + scriptId + " -> " + (info == null ? "{}" : String.valueOf(info.getSources())));
+            int sourceCount = info == null || info.getSources() == null ? 0 : info.getSources().size();
+            Logger.info("Script inited: " + scriptId + " sources=" + sourceCount);
         } catch (Exception e) {
             Logger.warn("Failed to parse script init data for " + scriptId + ": " + e.getMessage());
         }
@@ -416,7 +423,7 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
 
     @Override
     public void onUpdateAlert(String scriptId, String dataJson) {
-        Logger.info("[Alert] " + scriptId + ": " + dataJson);
+        Logger.info("Update alert from script: " + scriptId);
         UpdateAlert alert = parseUpdateAlert(scriptId, dataJson);
         notifyUpdateAlert(alert);
     }
@@ -593,6 +600,19 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
         }
     }
 
+    public void shutdown() {
+        for (ScriptContext context : scripts.values()) {
+            if (context != null) {
+                context.close();
+            }
+        }
+        scripts.clear();
+        scriptInfos.clear();
+        scriptMetas.clear();
+        sourceMap.clear();
+        sourceIndex.clear();
+        httpClient.shutdown();
+    }
 
     private String errorJson(String message) {
         Map<String, Object> error = new HashMap<>();
@@ -615,12 +635,6 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
                 .replace("\u2028", "\\u2028")
                 .replace("\u2029", "\\u2029");
         return "\"" + escaped + "\"";
-    }
-
-    private String trimLog(String value) {
-        if (value == null) return "null";
-        if (value.length() <= LOG_LIMIT) return value;
-        return value.substring(0, LOG_LIMIT) + "...(+" + (value.length() - LOG_LIMIT) + " chars)";
     }
 
     private ScriptMeta parseMeta(String scriptContent, String fallbackName) {
