@@ -128,6 +128,15 @@ public final class NotificationHelper {
         return false;
     }
 
+    public static boolean areNotificationsEnabled(Context context) {
+        if (context == null) return false;
+        try {
+            return NotificationManagerCompat.from(context).areNotificationsEnabled();
+        } catch (Exception ignored) {
+        }
+        return true;
+    }
+
     public static boolean isStatusChannelEnabled(Context context) {
         if (context == null) return false;
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true;

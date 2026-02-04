@@ -185,10 +185,23 @@ public class MainActivity extends AppCompatActivity {
     private void checkNotificationStatus() {
         if (isFinishing() || isDestroyed()) return;
         boolean permissionOk = NotificationHelper.canPost(this);
+        boolean appEnabled = NotificationHelper.areNotificationsEnabled(this);
         boolean channelOk = NotificationHelper.isStatusChannelEnabled(this);
-        if (!permissionOk || !channelOk) {
+        if (!permissionOk) {
             showNotificationPrompt(getString(R.string.notification_prompt_title),
                     getString(R.string.notification_prompt_permission));
+            scheduleNotificationCheck(false);
+            return;
+        }
+        if (!appEnabled) {
+            showNotificationPrompt(getString(R.string.notification_prompt_title),
+                    getString(R.string.notification_prompt_disabled));
+            scheduleNotificationCheck(false);
+            return;
+        }
+        if (!channelOk) {
+            showNotificationPrompt(getString(R.string.notification_prompt_title),
+                    getString(R.string.notification_prompt_channel));
             scheduleNotificationCheck(false);
             return;
         }

@@ -119,9 +119,11 @@
     <string name="notification_status_title">LiSync 正在运行</string>
     <string name="notification_status_text">后台常驻已启用，等待手表请求</string>
     <string name="notification_error_title">请求失败</string>
-    <string name="notification_prompt_title">通知未开启</string>
-    <string name="notification_prompt_permission">检测到后台常驻通知被关闭，手表请求可能不稳定。请在系统设置中开启通知。</string>
-    <string name="notification_prompt_missing">后台常驻通知未显示，可能被系统回收或隐藏。请在系统设置中开启通知。</string>
+    <string name="notification_prompt_title">通知异常</string>
+    <string name="notification_prompt_permission">未授予通知权限，请在系统设置中开启通知权限。</string>
+    <string name="notification_prompt_disabled">应用通知开关已关闭，请在系统设置中开启通知。</string>
+    <string name="notification_prompt_channel">后台常驻通知通道被关闭，请在通知设置中开启“后台常驻”。</string>
+    <string name="notification_prompt_missing">后台常驻通知被手动清除或系统回收，已尝试恢复。如仍无通知，请检查通知设置。</string>
     <string name="notification_prompt_settings">去设置</string>
     <string name="notification_prompt_ignore">暂不</string>
 </resources>
