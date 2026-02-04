@@ -1,7 +1,7 @@
 package mindrift.app.music.ui;
 
-import android.content.Intent;
-import android.net.Uri;
+import android.media.AudioAttributes;
+import android.media.MediaPlayer;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -24,12 +24,14 @@ import mindrift.app.music.App;
 import mindrift.app.music.R;
 import mindrift.app.music.core.proxy.RequestProxy;
 import mindrift.app.music.core.search.SearchService;
+import mindrift.app.music.core.lyric.LyricService;
 import mindrift.app.music.model.ResolveRequest;
 import mindrift.app.music.utils.PlatformUtils;
 
 public class SearchPlayActivity extends AppCompatActivity {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final SearchService searchService = new SearchService();
+    private final LyricService lyricService = new LyricService();
     private RequestProxy requestProxy;
     private AutoCompleteTextView platformDropdown;
     private TextInputEditText keywordInput;
@@ -38,7 +40,18 @@ public class SearchPlayActivity extends AppCompatActivity {
     private TextView statusText;
     private TextView emptyText;
     private LinearLayout resultsLayout;
+    private TextView playerTitleText;
+    private TextView playerArtistText;
+    private TextView playerStatusText;
+    private TextView lyricsText;
+    private MaterialButton playPauseButton;
+    private MaterialButton stopButton;
     private final List<PlatformItem> platformOptions = new ArrayList<>();
+    private MediaPlayer mediaPlayer;
+    private boolean playerPrepared = false;
+    private String currentUrl;
+    private SearchService.SearchItem currentItem;
+    private long currentActionToken = 0L;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,9 +68,20 @@ public class SearchPlayActivity extends AppCompatActivity {
         statusText = findViewById(R.id.text_search_status);
         emptyText = findViewById(R.id.text_search_empty);
         resultsLayout = findViewById(R.id.layout_search_results);
+        playerTitleText = findViewById(R.id.text_player_title);
+        playerArtistText = findViewById(R.id.text_player_artist);
+        playerStatusText = findViewById(R.id.text_player_status);
+        lyricsText = findViewById(R.id.text_player_lyrics);
+        playPauseButton = findViewById(R.id.button_player_toggle);
+        stopButton = findViewById(R.id.button_player_stop);
 
         setupPlatformOptions();
         searchButton.setOnClickListener(v -> runSearch());
+        playPauseButton.setOnClickListener(v -> togglePlayback());
+        stopButton.setOnClickListener(v -> stopPlayback());
+        stopButton.setEnabled(false);
+        updatePlayerInfo(null);
+        updateLyrics(getString(R.string.search_play_lyrics_placeholder));
     }
 
     @Override
@@ -65,6 +89,8 @@ public class SearchPlayActivity extends AppCompatActivity {
         super.onDestroy();
         executor.shutdown();
         searchService.shutdown();
+        lyricService.shutdown();
+        releasePlayer();
     }
 
     private void setupPlatformOptions() {
@@ -142,6 +168,12 @@ public class SearchPlayActivity extends AppCompatActivity {
 
     private void resolveAndPlay(SearchService.SearchItem item, View cardView) {
         if (item == null || item.id == null || item.id.isEmpty()) return;
+        long token = nextActionToken();
+        currentItem = item;
+        currentUrl = null;
+        releasePlayer();
+        updatePlayerInfo(item);
+        updateLyrics(getString(R.string.search_play_lyrics_loading));
         cardView.setEnabled(false);
         statusText.setText(getString(R.string.search_play_status_resolving, safe(item.title)));
         executor.execute(() -> {
@@ -169,28 +201,102 @@ public class SearchPlayActivity extends AppCompatActivity {
             String resolvedError = error;
             runOnUiThread(() -> {
                 cardView.setEnabled(true);
+                if (!isCurrentToken(token)) return;
                 if (resolvedUrl != null && !resolvedUrl.trim().isEmpty()) {
+                    currentUrl = resolvedUrl;
                     statusText.setText(getString(R.string.search_play_status_opened));
-                    openPlayer(resolvedUrl);
+                    prepareAndPlay(resolvedUrl);
                 } else {
                     String message = resolvedError == null || resolvedError.trim().isEmpty()
                             ? getString(R.string.result_empty)
                             : resolvedError.trim();
                     statusText.setText(getString(R.string.search_play_status_failed, message));
+                    playerStatusText.setText(getString(R.string.search_play_player_status_stopped));
                     Toast.makeText(this, getString(R.string.search_play_status_failed, message), Toast.LENGTH_SHORT).show();
                 }
             });
         });
+        fetchLyricsAsync(item, token);
     }
 
-    private void openPlayer(String url) {
+    private void prepareAndPlay(String url) {
+        if (url == null || url.trim().isEmpty()) return;
+        releasePlayer();
+        playerPrepared = false;
+        playerStatusText.setText(getString(R.string.search_play_player_status_buffering));
+        playPauseButton.setEnabled(false);
+        stopButton.setEnabled(true);
+        mediaPlayer = new MediaPlayer();
+        mediaPlayer.setAudioAttributes(new AudioAttributes.Builder()
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .build());
+        mediaPlayer.setOnPreparedListener(mp -> {
+            playerPrepared = true;
+            mp.start();
+            playerStatusText.setText(getString(R.string.search_play_player_status_playing));
+            playPauseButton.setText(getString(R.string.search_play_action_pause));
+            playPauseButton.setEnabled(true);
+        });
+        mediaPlayer.setOnCompletionListener(mp -> {
+            playerStatusText.setText(getString(R.string.search_play_player_status_complete));
+            playPauseButton.setText(getString(R.string.search_play_action_play));
+            playPauseButton.setEnabled(true);
+        });
+        mediaPlayer.setOnErrorListener((mp, what, extra) -> {
+            playerStatusText.setText(getString(R.string.search_play_player_status_stopped));
+            playPauseButton.setText(getString(R.string.search_play_action_play));
+            playPauseButton.setEnabled(true);
+            return true;
+        });
         try {
-            Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setDataAndType(Uri.parse(url), "audio/*");
-            startActivity(intent);
+            mediaPlayer.setDataSource(url);
+            mediaPlayer.prepareAsync();
         } catch (Exception e) {
+            playerStatusText.setText(getString(R.string.search_play_player_status_stopped));
+            playPauseButton.setEnabled(true);
             Toast.makeText(this, getString(R.string.search_play_open_failed), Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void togglePlayback() {
+        if (mediaPlayer == null) {
+            if (currentUrl != null && !currentUrl.trim().isEmpty()) {
+                prepareAndPlay(currentUrl);
+            }
+            return;
+        }
+        if (!playerPrepared) return;
+        if (mediaPlayer.isPlaying()) {
+            mediaPlayer.pause();
+            playerStatusText.setText(getString(R.string.search_play_player_status_paused));
+            playPauseButton.setText(getString(R.string.search_play_action_play));
+        } else {
+            mediaPlayer.start();
+            playerStatusText.setText(getString(R.string.search_play_player_status_playing));
+            playPauseButton.setText(getString(R.string.search_play_action_pause));
+        }
+    }
+
+    private void stopPlayback() {
+        releasePlayer();
+        playerStatusText.setText(getString(R.string.search_play_player_status_stopped));
+        playPauseButton.setText(getString(R.string.search_play_action_play));
+        stopButton.setEnabled(false);
+    }
+
+    private void releasePlayer() {
+        if (mediaPlayer == null) return;
+        try {
+            mediaPlayer.stop();
+        } catch (Exception ignored) {
+        }
+        try {
+            mediaPlayer.release();
+        } catch (Exception ignored) {
+        }
+        mediaPlayer = null;
+        playerPrepared = false;
     }
 
     private String buildSubtitle(SearchService.SearchItem item) {
@@ -276,6 +382,54 @@ public class SearchPlayActivity extends AppCompatActivity {
             return trimmed;
         }
         return null;
+    }
+
+    private void updatePlayerInfo(SearchService.SearchItem item) {
+        String title = item == null ? "" : safe(item.title);
+        String artist = item == null ? "" : safe(item.artist);
+        playerTitleText.setText(title.isEmpty() ? getString(R.string.search_play_player_title_placeholder) : title);
+        playerArtistText.setText(getString(R.string.search_play_player_artist_format, artist.isEmpty() ? "-" : artist));
+        playerStatusText.setText(getString(R.string.search_play_player_status_idle));
+        playPauseButton.setText(getString(R.string.search_play_action_play));
+        playPauseButton.setEnabled(true);
+        stopButton.setEnabled(false);
+    }
+
+    private void fetchLyricsAsync(SearchService.SearchItem item, long token) {
+        executor.execute(() -> {
+            LyricService.LyricResult result = lyricService.getLyric(item.source, item.id);
+            String lyric = pickLyric(result);
+            runOnUiThread(() -> {
+                if (!isCurrentToken(token)) return;
+                if (lyric == null || lyric.trim().isEmpty()) {
+                    updateLyrics(getString(R.string.search_play_lyrics_empty));
+                } else {
+                    updateLyrics(lyric);
+                }
+            });
+        });
+    }
+
+    private String pickLyric(LyricService.LyricResult result) {
+        if (result == null) return "";
+        if (result.lyric != null && !result.lyric.trim().isEmpty()) return result.lyric.trim();
+        if (result.tlyric != null && !result.tlyric.trim().isEmpty()) return result.tlyric.trim();
+        if (result.rlyric != null && !result.rlyric.trim().isEmpty()) return result.rlyric.trim();
+        if (result.lxlyric != null && !result.lxlyric.trim().isEmpty()) return result.lxlyric.trim();
+        return "";
+    }
+
+    private void updateLyrics(String text) {
+        lyricsText.setText(text == null ? "" : text);
+    }
+
+    private synchronized long nextActionToken() {
+        currentActionToken += 1;
+        return currentActionToken;
+    }
+
+    private synchronized boolean isCurrentToken(long token) {
+        return token == currentActionToken;
     }
 
     private String safe(String value) {
