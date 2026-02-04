@@ -1,16 +1,35 @@
 .gradle/
 .idea/
 *.iml
+*.ipr
+*.iws
+/.idea/
 /local.properties
 /build/
-/app/build/
 /out/
-/keystore.properties
-/*.jks
+**/build/
+/app/build/
+/captures/
+/.cxx/
+/.externalNativeBuild/
 
 # Android Studio
 .cxx/
 .externalNativeBuild/
+.navigation/
+*.log
+
+# Keystore / keys
+/keystore.properties
+/*.jks
+*.jks
+*.keystore
+*.p12
+*.pem
+*.der
+*.csr
+*.key
+/sign/
 
 # OS
 .DS_Store
