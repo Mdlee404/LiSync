@@ -89,6 +89,7 @@ public class SettingsActivity extends AppCompatActivity {
         MaterialButton cacheRefreshButton = findViewById(R.id.button_cache_refresh);
         MaterialButton cacheClearButton = findViewById(R.id.button_cache_clear);
         MaterialButton testButton = findViewById(R.id.button_test_request);
+        MaterialButton openSearchPlayButton = findViewById(R.id.button_open_search_play);
         TextView copyLogsButton = findViewById(R.id.button_copy_logs);
         TextView clearLogsButton = findViewById(R.id.button_clear_logs);
 
@@ -98,6 +99,7 @@ public class SettingsActivity extends AppCompatActivity {
             refreshData();
         });
         testButton.setOnClickListener(v -> runTestRequest());
+        openSearchPlayButton.setOnClickListener(v -> startActivity(new Intent(this, SearchPlayActivity.class)));
         copyLogsButton.setOnClickListener(v -> copyLogs());
         clearLogsButton.setOnClickListener(v -> {
             AppLogBuffer.clear();

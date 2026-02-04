@@ -35,6 +35,10 @@
             android:name=".ui.SettingsActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".ui.SearchPlayActivity"
+            android:exported="false" />
+
         <service
             android:name=".service.KeepAliveService"
             android:exported="false"
