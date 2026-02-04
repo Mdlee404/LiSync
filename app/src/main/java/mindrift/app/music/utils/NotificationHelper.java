@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.service.notification.StatusBarNotification;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
@@ -107,5 +108,37 @@ public final class NotificationHelper {
                 .setAutoCancel(true)
                 .build();
         NotificationManagerCompat.from(context).notify(NOTIFY_ID_ERROR, notification);
+    }
+
+    public static boolean isStatusNotificationActive(Context context) {
+        if (context == null) return false;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false;
+        try {
+            NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (manager == null) return false;
+            StatusBarNotification[] list = manager.getActiveNotifications();
+            if (list == null) return false;
+            for (StatusBarNotification sbn : list) {
+                if (sbn != null && sbn.getId() == NOTIFY_ID_STATUS) {
+                    return true;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
+    }
+
+    public static boolean isStatusChannelEnabled(Context context) {
+        if (context == null) return false;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true;
+        try {
+            NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (manager == null) return false;
+            NotificationChannel channel = manager.getNotificationChannel(CHANNEL_STATUS);
+            if (channel == null) return true;
+            return channel.getImportance() != NotificationManager.IMPORTANCE_NONE;
+        } catch (Exception ignored) {
+        }
+        return true;
     }
 }

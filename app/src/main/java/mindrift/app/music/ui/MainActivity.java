@@ -8,10 +8,12 @@ import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.net.Uri;
 import android.Manifest;
+import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
+import android.provider.Settings;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
@@ -31,6 +33,7 @@ import mindrift.app.music.R;
 import mindrift.app.music.core.cache.CacheEntry;
 import mindrift.app.music.core.cache.CacheManager;
 import mindrift.app.music.core.script.ScriptManager;
+import mindrift.app.music.utils.NotificationHelper;
 import mindrift.app.music.wearable.XiaomiWearableManager;
 
 public class MainActivity extends AppCompatActivity {
@@ -50,9 +53,13 @@ public class MainActivity extends AppCompatActivity {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Runnable deviceStatusRefresh = this::updateDeviceStatus;
     private final Runnable deviceStatusRefreshDelayed = this::updateDeviceStatus;
+    private final Runnable notificationCheck = this::checkNotificationStatus;
     private boolean serviceDialogShown = false;
     private boolean deviceDialogShown = false;
     private String lastSelectedScriptId;
+    private boolean notificationDialogShown = false;
+    private long lastNotificationPromptAt = 0L;
+    private static final long NOTIFICATION_CHECK_INTERVAL_MS = 20_000L;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -138,6 +145,20 @@ public class MainActivity extends AppCompatActivity {
         executor.shutdown();
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        App app = (App) getApplication();
+        app.ensureKeepAliveService();
+        scheduleNotificationCheck(true);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        mainHandler.removeCallbacks(notificationCheck);
+    }
+
     private void refreshData() {
         refreshData(null);
     }
@@ -150,6 +171,63 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFICATIONS);
+    }
+
+    private void scheduleNotificationCheck(boolean immediate) {
+        mainHandler.removeCallbacks(notificationCheck);
+        if (immediate) {
+            mainHandler.post(notificationCheck);
+        } else {
+            mainHandler.postDelayed(notificationCheck, NOTIFICATION_CHECK_INTERVAL_MS);
+        }
+    }
+
+    private void checkNotificationStatus() {
+        if (isFinishing() || isDestroyed()) return;
+        boolean permissionOk = NotificationHelper.canPost(this);
+        boolean channelOk = NotificationHelper.isStatusChannelEnabled(this);
+        if (!permissionOk || !channelOk) {
+            showNotificationPrompt(getString(R.string.notification_prompt_title),
+                    getString(R.string.notification_prompt_permission));
+            scheduleNotificationCheck(false);
+            return;
+        }
+        App app = (App) getApplication();
+        app.ensureKeepAliveService();
+        if (!NotificationHelper.isStatusNotificationActive(this)) {
+            NotificationHelper.showOngoing(this);
+            showNotificationPrompt(getString(R.string.notification_prompt_title),
+                    getString(R.string.notification_prompt_missing));
+        }
+        scheduleNotificationCheck(false);
+    }
+
+    private void showNotificationPrompt(String title, String message) {
+        long now = System.currentTimeMillis();
+        if (notificationDialogShown && (now - lastNotificationPromptAt) < NOTIFICATION_CHECK_INTERVAL_MS) return;
+        notificationDialogShown = true;
+        lastNotificationPromptAt = now;
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton(getString(R.string.notification_prompt_settings), (dialog, which) -> openNotificationSettings())
+                .setNegativeButton(getString(R.string.notification_prompt_ignore), (dialog, which) -> {
+                    notificationDialogShown = false;
+                })
+                .setOnDismissListener(dialog -> notificationDialogShown = false)
+                .show();
+    }
+
+    private void openNotificationSettings() {
+        try {
+            Intent intent = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+            intent.putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+            startActivity(intent);
+        } catch (Exception e) {
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            intent.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        }
     }
 
     private void refreshData(String preferredScriptId) {
