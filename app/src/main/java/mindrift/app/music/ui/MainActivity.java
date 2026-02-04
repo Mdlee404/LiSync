@@ -59,7 +59,7 @@ public class MainActivity extends AppCompatActivity {
     private String lastSelectedScriptId;
     private boolean notificationDialogShown = false;
     private long lastNotificationPromptAt = 0L;
-    private static final long NOTIFICATION_CHECK_INTERVAL_MS = 20_000L;
+    private static final long NOTIFICATION_CHECK_INTERVAL_MS = 5_000L;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -209,8 +209,6 @@ public class MainActivity extends AppCompatActivity {
         app.ensureKeepAliveService();
         if (!NotificationHelper.isStatusNotificationActive(this)) {
             NotificationHelper.showOngoing(this);
-            showNotificationPrompt(getString(R.string.notification_prompt_title),
-                    getString(R.string.notification_prompt_missing));
         }
         scheduleNotificationCheck(false);
     }
