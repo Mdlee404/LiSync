@@ -1,4 +1,4 @@
-﻿# Vela 快应用接入 LiSync 指南
+# Vela 快应用接入 LiSync 指南
 
 本文档说明 Vela 快应用（手表端）如何与 LiSync 手机端通信获取播放链接。
 
@@ -11,7 +11,7 @@
 ## 1.1 包名与签名一致性（必做）
 **interconnect 通信前提**：快应用与安卓端三方应用的 **包名** 和 **签名** 必须一致。
 
-- 快应用 `manifest.json` 的 `package` 必须与安卓端包名一致：`mindrift.app.musiclite`
+- 快应用 `manifest.json` 的 `package` 必须与安卓端包名一致：`mindrift.app.music`
 - 快应用签名需要使用安卓端签名（`lisync.jks`）
 
 ### 从 `lisync.jks` 提取签名（推荐流程）
@@ -333,3 +333,4 @@ sendMessage(JSON.stringify(payload));
 **限制**
 - 单文件最大 5MB
 - 分片大小 8KB
+

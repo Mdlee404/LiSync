@@ -1,10 +1,10 @@
-﻿# LiSynchronization Android APP 详细实施计划 (Java 修订版)
+# LiSynchronization Android APP 详细实施计划 (Java 修订版)
 
 ## 项目概述
 
 **项目名称**：LiSynchronization
 **项目类型**：Android 应用
-**包名**：mindrift.app.musiclite
+**包名**：mindrift.app.music
 **开发目标**：开发一个 Android 应用，作为落雪音乐音源的中转服务，兼容小米穿戴设备。核心聚焦于高效的消息转发与脚本执行，剥离非必要的设备状态监控与通知功能。
 
 ---
@@ -206,3 +206,4 @@ public class CacheManager {
 6.  **网络与缓存**: 实现 OkHttp 封装与 4 小时缓存机制。
 7.  **穿戴集成**: 实现 `MessageApi` 收发，**跳过**所有状态订阅与通知代码。
 8.  **主流程联调**: 串联各个模块，验证“收到消息 -> 路由 -> 执行 -> 返回”。
+

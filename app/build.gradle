@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace 'mindrift.app.musiclite'
+    namespace 'mindrift.app.music'
     compileSdk 34
 
     def keystoreProperties = new Properties()
@@ -25,7 +25,7 @@ android {
     }
 
     defaultConfig {
-        applicationId "mindrift.app.musiclite"
+        applicationId "mindrift.app.music"
         minSdk 28
         targetSdk 34
         versionCode 1

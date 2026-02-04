@@ -1,632 +1,341 @@
-﻿# AGENTS.md - LiSynchronization 项目上下文文档
+# AGENTS.md - LiSynchronization 项目上下文文档
 
-本文档为 AI 代理提供 LiSynchronization 项目的全面上下文信息，帮助快速理解项目结构、开发流程和核心功能。
+本文档为 AI 代理提供 LiSynchronization（又称 **LiSync**）项目的上下文，便于快速理解结构、核心逻辑与开发流程。
 
 ---
 
 ## 项目概述
 
-**LiSynchronization** 是一个 Android 原生应用，主要功能是作为落雪音乐的音源中转服务，并兼容小米穿戴设备。该应用允许手表设备通过手机应用获取各音乐平台的播放链接。
+**LiSynchronization** 是一个 Android 原生应用，作为落雪音乐音源脚本的 **手机端中转服务**，并与 **小米穿戴/小米健康**配套使用。手表端（Vela 快应用）通过手机端请求各平台播放链接、搜索与歌词数据。
 
 ### 核心功能
 
-- **音源中转服务**：通过 QuickJS JavaScript 引擎动态执行音源脚本，支持多个音乐平台
-- **小米穿戴集成**：与小米手表设备通信，提供音乐播放链接获取服务
-- **脚本管理**：支持本地导入和 URL 下载音源脚本
-- **智能缓存**：4小时双重缓存（内存+文件），提升响应速度
-- **负载均衡**：支持指定脚本和轮询负载均衡两种路由模式
+* **音源脚本执行**：QuickJS 运行自定义脚本，解析 `musicUrl`（脚本声明的 source/quality）。
+* **小米穿戴集成**：MessageApi 通信、权限申请（DEVICE\_MANAGER/NOTIFY）、握手与能力推送。
+* **设备状态监测**：连接/充电/佩戴/睡眠状态查询与订阅（NodeApi）。
+* **脚本管理**：本地导入 / URL 下载 / 编辑 / 重命名 / 删除。
+* **缓存**：
 
-### 项目架构
+  * 播放链接：4 小时（内存 + `cache.json`）。
+  * 搜索与歌词：5 分钟 LRU（内存，最多 100 条）。
+
+* **能力更新推送**：脚本变更后推送 `capabilitiesUpdate` 给手表。
+* **本地音乐上传**：手机端分片上传音频到手表（最大 5MB，8KB 分片）。
+* **日志缓冲**：AppLogBuffer 记录最近 500 行，Settings 可查看/复制。
+
+### 核心数据流（简化）
 
 ```
-小米手表设备
-    ↓ JSON 请求
-XiaomiWearableManager (消息收发)
-    ↓
-RequestProxy (缓存检查 + 路由)
-    ↓
-ScriptManager (脚本管理)
-    ↓
-ScriptContext + LxNativeImpl (QuickJS 执行)
-    ↓
-HttpClient (网络请求)
-    ↓
-返回响应
+手表快应用 (Vela)
+  ↓ JSON + \_requestId
+XiaomiWearableManager
+  ├─ action=search  -> SearchService -> HttpClient
+  ├─ action=lyric/getLyric -> LyricService  -> HttpClient
+  ├─ action=WATCH\_READY/capabilities/getCapabilities -> ScriptManager.getCapabilitiesSummary()
+  ├─ action=upload.\* -> UploadSession (start/chunk/finish/ack/result)
+  └─ 其他请求       -> RequestProxy
+       ├─ CacheManager (cache.json)
+       └─ ScriptManager -> ScriptContext + LxNativeImpl (QuickJS)
+            -> HttpClient
 ```
 
 ---
 
 ## 技术栈
 
-### Android 应用 (LiSynchronization)
+### Android 应用 (LiSync)
 
-| 组件 | 技术/库 | 版本 |
-|------|---------|------|
-| 开发语言 | Java | 1.8 |
-| JavaScript 引擎 | QuickJS (quickjs-android) | 2.4.0 |
-| 网络请求 | OkHttp | 4.12.0 |
-| JSON 处理 | Gson | 2.10.1 |
-| 缓存存储 | Room | 2.6.1 |
-| UI 组件 | Material Design | 1.13.0 |
-| 小米穿戴 SDK | xms-wearable-lib | 1.4 |
-| 生命周期组件 | lifecycle-common-java8 | 2.8.7 |
+|组件|技术/库|版本|
+|-|-|-|
+|开发语言|Java|1.8|
+|构建插件|Android Gradle Plugin|8.13.2|
+|JavaScript 引擎|QuickJS Wrapper (`wang.harlon.quickjs`)|2.4.0|
+|网络请求|OkHttp + logging-interceptor|4.12.0|
+|JSON 处理|Gson|2.10.1|
+|缓存存储|Room (仅 Java runtime/processor)|2.6.1|
+|UI 组件|Material Design|1.13.0|
+|UI 基础|AppCompat|1.7.1|
+|文档访问|DocumentFile|1.0.1|
+|生命周期组件|lifecycle-common-java8|2.8.7|
+|小米穿戴 SDK|xms-wearable-lib|1.4|
 
-### React Native 应用 (lx-music-mobile - 参考项目)
+### React Native 项目（参考/上游）
 
-| 组件 | 技术/库 | 版本 |
-|------|---------|------|
-| 框架 | React Native | 0.73.11 |
-| 应用版本 | lx-music-mobile | 1.8.0 |
-| 导航 | react-native-navigation | 7.39.2 |
-| 音频播放 | react-native-track-player | - |
+`lx-music-mobile/` 为完整上游仓库，包含 `lx-music-desktop/` 子项目，仅作为脚本/协议参考，不参与 LiSync 构建。
 
 ---
 
-## 项目结构
+## 项目结构（关键路径）
 
 ```
-F:\Project\LiSynchronization\
-├── app/                           # Android 应用主模块
-│   ├── build.gradle               # Android 构建配置
-│   ├── proguard-rules.pro         # ProGuard 规则
-│   ├── libs/                      # 第三方库
-│   │   └── xms-wearable-lib_1.4_release.aar  # 小米穿戴 SDK
+F:\\Project\\LiSynchronization\\
+├── app/                              # Android 主模块
+│   ├── build.gradle
+│   ├── proguard-rules.pro
+│   ├── libs/xms-wearable-lib\_1.4\_release.aar
 │   └── src/main/
-│       ├── AndroidManifest.xml    # 应用清单
-│       ├── assets/                # 资源文件
-│       ├── java/mindrift/app/lisynchronization/
-│       │   ├── App.java           # Application 入口
+│       ├── AndroidManifest.xml
+│       ├── assets/script/user-api-preload.js
+│       ├── java/mindrift/app/music/
+│       │   ├── App.java
 │       │   ├── ui/
-│       │   │   └── MainActivity.java  # 主 Activity
-│       │   ├── wearable/
-│       │   │   └── XiaomiWearableManager.java  # 小米穿戴管理
+│       │   │   ├── AgreementActivity.java
+│       │   │   ├── MainActivity.java
+│       │   │   └── SettingsActivity.java
+│       │   ├── wearable/XiaomiWearableManager.java
 │       │   ├── core/
-│       │   │   ├── cache/         # 缓存管理
-│       │   │   │   ├── CacheManager.java
-│       │   │   │   └── CacheEntry.java
-│       │   │   ├── engine/        # 执行引擎
-│       │   │   │   ├── LxNativeInterface.java
-│       │   │   │   ├── LxNativeImpl.java
-│       │   │   │   └── ScriptContext.java
-│       │   │   ├── network/       # 网络请求
-│       │   │   │   ├── HttpClient.java
-│       │   │   │   ├── HttpUtils.java
-│       │   │   │   └── NetworkConfig.java
-│       │   │   ├── proxy/         # 请求代理
-│       │   │   │   ├── RequestProxy.java
-│       │   │   │   └── ScriptHandler.java
-│       │   │   └── script/        # 脚本管理
-│       │   │       ├── ScriptManager.java
-│       │   │       ├── ScriptContext.java
-│       │   │       ├── ScriptInfo.java
-│       │   │       ├── ScriptMeta.java
-│       │   │       └── SourceInfo.java
-│       │   ├── model/             # 数据模型
-│       │   │   └── ResolveRequest.java
-│       │   └── utils/             # 工具类
-│       │       ├── Logger.java
-│       │       ├── CryptoUtils.java
-│       │       └── AppLogBuffer.java
-│       └── res/                   # Android 资源
-├── lx-music-mobile/               # React Native 音乐播放器（参考）
-│   ├── package.json               # NPM 配置和脚本
-│   ├── src/                       # 源代码
-│   ├── android/                   # Android 平台配置
-│   │   ├── build.gradle
-│   │   └── app/build.gradle
-│   └── ios/                       # iOS 平台配置
-├── gradle/                        # Gradle 配置
-│   └── libs.versions.toml         # 版本目录
-├── plan.md                        # 项目详细实施计划
-├── server_able_run.js             # Node.js 中间件服务器（参考）
-├── 小米穿戴第三方APP能力开放接口文档_1.4.txt  # SDK 文档
-└── settings.gradle                # Gradle 项目设置
+│       │   │   ├── cache/CacheManager.java, CacheEntry.java
+│       │   │   ├── engine/LxNativeImpl.java, LxNativeInterface.java
+│       │   │   ├── lyric/LyricService.java
+│       │   │   ├── network/HttpClient.java, HttpUtils.java, NetworkConfig.java
+│       │   │   ├── proxy/RequestProxy.java, ScriptHandler.java
+│       │   │   ├── script/ScriptManager.java, ScriptContext.java,
+│       │   │   │           ScriptInfo.java, ScriptMeta.java, SourceInfo.java
+│       │   │   └── search/SearchService.java
+│       │   ├── model/ResolveRequest.java
+│       │   └── utils/Logger.java, CryptoUtils.java, AppLogBuffer.java
+│       └── res/
+├── docs/
+│   ├── LiSync\_Protocol\_Spec.md
+│   ├── vela\_quickapp\_integration.md
+│   └── custom\_source.md
+├── gradle/libs.versions.toml
+├── sign/                             # 快应用签名证书（debug/release）
+├── lisync.jks / keystore.properties  # Android 签名
+├── server\_able\_run.js                # Node 中转服务参考
+├── interconnect测试.pdf / interconnect测试.txt
+└── 小米穿戴第三方APP能力开放接口文档\_1.4.\*
 ```
 
 ---
 
-## 构建和运行
+## 构建与运行
 
-### Android 应用 (LiSynchronization)
+### Android 应用 (LiSync)
 
-#### 前置要求
-
-- JDK 1.8 或更高版本
-- Android SDK API 34
-- Android SDK Build Tools
-
-#### 构建命令
-
-从项目根目录 `F:\Project\LiSynchronization` 执行：
+在项目根目录执行：
 
 ```powershell
-# 清理构建
 gradlew.bat clean
-
-# 构建 Debug APK
 gradlew.bat assembleDebug
-
-# 构建 Release APK
 gradlew.bat assembleRelease
-
-# 安装 Debug APK 到连接的设备
 gradlew.bat installDebug
-
-# 安装 Release APK 到连接的设备
 gradlew.bat installRelease
-
-# 运行单元测试
 gradlew.bat test
-
-# 运行 Android 仪器测试
 gradlew.bat connectedAndroidTest
 ```
 
 #### 输出位置
 
-- Debug APK: `app/build/outputs/apk/debug/`
-- Release APK: `app/build/outputs/apk/release/`
+* Debug APK: `app/build/outputs/apk/debug/`
+* Release APK: `app/build/outputs/apk/release/`
 
 #### 应用配置
 
-- **Application ID**: `mindrift.app.musiclite`
-- **Compile SDK**: 34
-- **Min SDK**: 28 (Android 9.0)
-- **Target SDK**: 34 (Android 14)
-- **Java Version**: 1.8
+* **Application ID / Namespace**: `mindrift.app.music`
+* **VersionCode / VersionName**: `1` / `1.0`
+* **Compile SDK**: 34
+* **Min SDK**: 28
+* **Target SDK**: 34
 
-#### 特殊配置
+#### 构建差异（实际配置）
 
-1. **小米 SDK**: AAR 文件位于 `app/libs/xms-wearable-lib_1.4_release.aar`
-2. **Room Schema**: 生成的数据库架构存储在 `app/schemas/`
-3. **ProGuard 规则**:
-   ```proguard
-   -dontwarn com.xiaomi.xms.**
-   -dontwarn app.cash.quickjs.**
-   ```
+|特性|Debug|Release|
+|-|-|-|
+|Minify|禁用|禁用（`minifyEnabled false`）|
+|ProGuard|不应用|使用 `proguard-android-optimize.txt` + `proguard-rules.pro`|
+|Signing|若存在 keystore 则用 Release 签名|Release 签名|
 
-### React Native 应用 (lx-music-mobile)
+---
 
-#### 前置要求
+## 关键模块说明
 
-- Node.js >= 18
-- npm >= 8.5.2
-- React Native 开发环境
+### XiaomiWearableManager
 
-#### 构建命令
+**路径**: `app/src/main/java/mindrift/app/music/wearable/XiaomiWearableManager.java`
 
-```powershell
-# 导航到 React Native 项目目录
-cd F:\Project\LiSynchronization\lx-music-mobile
+**职责**: 与小米穿戴/小米健康通信的核心管理器。
 
-# 首次安装依赖
-npm install
+**关键点**:
 
-# 开发模式运行
-npm run dev
+* 服务连接监听、节点刷新（3s 节流）与状态订阅/查询（连接/充电/佩戴/睡眠）。
+* 权限申请：`Permission.DEVICE\_MANAGER` 与 `Permission.NOTIFY`（AuthApi），通过后挂载 MessageApi 监听。
+* 启动手表端快应用：`/pages/init`（`launchWearApp`）。
+* 处理消息动作：
 
-# 构建 Release APK
-npm run pack:android
+  * `getCapabilities` / `capabilities` / `capabilitiesUpdate`（支持 action/type/cmd）
+  * `WATCH\_READY` -> `WATCH\_READY\_ACK`
+  * `search` / `lyric` / `getLyric`（走内置 SearchService / LyricService）
+  * 其他 JSON 请求 -> `RequestProxy`（脚本解析）
+  * `upload.start` / `upload.chunk` / `upload.finish` + `upload.ack` / `upload.result`（本地音乐上传，8KB 分片，30s 超时）
 
-# 构建 Debug APK
-npm run pack:android:debug
+* **严格回传 `\_requestId`**（手表端依赖）。
 
-# 清理 Gradle 构建
-npm run clear
+### RequestProxy
 
-# 完全清理（包括 git，保留密钥库）
-npm run clear:full
+**路径**: `app/src/main/java/mindrift/app/music/core/proxy/RequestProxy.java`
 
-# 启动 Metro Bundler
-npm start
+**职责**: 解析请求、缓存与脚本路由。
 
-# 重置缓存启动 Metro
-npm run sc
+**行为**:
 
-# 运行 ESLint
-npm run lint
+* `action` 默认 `musicUrl`，`quality` 默认 `128k`。
+* `targetScriptId` 指定脚本优先；否则轮询可用脚本并逐个尝试。
+* 若脚本不支持音质，降级到 `128k`。
+* 请求超时：4s（`REQUEST\_TIMEOUT\_MS`）。
+* 返回统一结构：`code/message/data/provider/info/url`（当响应含 `url` 时 `data` 为 `url`）。
 
-# 自动修复 ESLint 问题
-npm run lint:fix
+### ScriptManager
 
-# 打包 JavaScript (Android)
-npm run bundle-android
-```
+**路径**: `app/src/main/java/mindrift/app/music/core/script/ScriptManager.java`
 
-#### 可用脚本
+**职责**: 脚本生命周期与能力管理。
 
-| 命令 | 描述 |
-|------|------|
-| `npm run dev` | 以开发模式运行 Android |
-| `npm run ios` | 以开发模式运行 iOS |
-| `npm start` | 启动 Metro bundler |
-| `npm run sc` | 启动 Metro 并重置缓存 |
-| `npm run lint` | 运行 ESLint |
-| `npm run lint:fix` | 自动修复 ESLint 问题 |
-| `npm run pack:android` | 构建 Release APK |
-| `npm run pack:android:debug` | 构建 Debug APK |
+**行为**:
 
-#### 输出位置
+* 脚本目录：`Context.getFilesDir()/scripts`。
+* 预加载脚本：`assets/script/user-api-preload.js`（定义 `globalThis.lx` API）。
+* 解析脚本头注释（`@name/@version/...`），注册 `SourceInfo` 能力。
+* 导入/编辑/重命名/删除脚本后 `loadScripts()`。
+* `dispatchRequest` -> QuickJS 异步结果等待。
+* `getCapabilitiesSummary()` 仅汇总 `type=music` 且支持 `musicUrl` 的平台能力，排序优先 `tx/wy/kg/kw/mg/local`。
 
-- APK: `android/app/build/outputs/apk/`
-- Universal: `lx-music-mobile-v{version}-universal.apk`
-- Per-arch: `lx-music-mobile-v{version}-{abi}.apk`
-  - `armeabi-v7a`
-  - `x86`
-  - `arm64-v8a`
-  - `x86_64`
+### ScriptContext + LxNativeImpl
 
-#### Release 构建注意事项
+**路径**:
 
-1. 需要在 `android/` 目录中创建 `keystore.properties` 文件
-2. ProGuard 在 Release 构建中启用
-3. Hermes 和 JSC 都支持
+* `app/src/main/java/mindrift/app/music/core/script/ScriptContext.java`
+* `app/src/main/java/mindrift/app/music/core/engine/LxNativeImpl.java`
+
+**职责**: QuickJS 执行与 JS/Native 桥接。
+
+**能力**:
+
+* `\_\_lx\_native\_\_` 桥接 `request/response/init/showUpdateAlert/cancelRequest` 与 `setTimeout`。
+* `lx.request` / `requestSync` 封装 OkHttp 网络请求。
+* 提供 AES/RSA/MD5、Buffer、Base64、zlib（inflate/deflate）等工具方法。
+* 兼容补丁：对特定 API（`api.music.lerd.dpdns.org`）补充 `source/quality/songid` 字段。
+
+### CacheManager
+
+**路径**: `app/src/main/java/mindrift/app/music/core/cache/CacheManager.java`
+
+**职责**: 播放链接缓存（内存 + 文件）。
+
+**特性**:
+
+* 默认 4 小时过期，写入即保存。
+* 文件缓存：`filesDir/cache.json`。
+* 定时清理/保存（10 分钟清理，5 分钟持久化）。
+
+### SearchService / LyricService
+
+**路径**:
+
+* `core/search/SearchService.java`
+* `core/lyric/LyricService.java`
+
+**特性**:
+
+* 平台：`tx` / `wy` / `kg`（内置直连接口），search 支持平台回退（指定平台 -> tx -> wy -> kg）。
+* 5 分钟 LRU 缓存（最多 100 条）。
+
+### HttpClient
+
+**路径**: `app/src/main/java/mindrift/app/music/core/network/HttpClient.java`
+
+**特性**:
+
+* 支持 `GET/POST/PUT/DELETE` 与 body/form/formData（可单次覆盖 timeout）。
+* 默认 UA：`lx-music-android/1.0`（见 `NetworkConfig`）。
+* 默认超时：15s。
+
+### UI
+
+* **AgreementActivity**：启动协议页，未同意则不进入主界面。
+* **MainActivity**：脚本管理 + 设备状态/刷新 + 上传音乐。
+* **SettingsActivity**：缓存/日志查看与复制、脚本能力展示、请求测试（musicUrl/search/lyric）。
+
+---
+
+## 支持的平台与操作
+
+### 脚本能力（由脚本声明）
+
+常见平台代码：`tx` / `wy` / `kg` / `kw` / `mg` / `local`。  
+脚本可声明支持的 `actions` 与 `qualitys`，`local` 支持 `musicUrl/lyric/pic`（手表端能力推送仅聚合 `musicUrl`）。
+
+### 内置能力
+
+* 搜索：`tx / wy / kg`
+* 歌词：`tx / wy / kg`
+
+---
+
+## 请求与响应（关键字段）
+
+### 通用请求字段（ResolveRequest）
+
+* `source` 或 `platform`：平台代码。
+* `songid` / `id` / `songId` / `songID`：歌曲 ID。
+* `musicInfo.songmid` / `musicInfo.hash`：歌曲 ID（优先级高于 `songid`）。
+* `action`：默认 `musicUrl`。
+* `quality`：默认 `128k`。
+* `nocache`：跳过缓存。
+* `targetScriptId`：指定脚本（可选）。
+
+### 手表通信关键点
+
+* **请求必须携带 `\_requestId`**，手机端响应必须原样回传。
+* 详细协议见：`docs/LiSync\_Protocol\_Spec.md` 与 `docs/vela\_quickapp\_integration.md`。
+
+---
+
+## 关键配置与运行时目录
+
+* **明文 HTTP**：`app/src/main/res/xml/network\_security\_config.xml` 允许明文流量。
+* **脚本目录**：`filesDir/scripts`
+* **缓存文件**：`filesDir/cache.json`
+* **Room schema**：`app/schemas/`
 
 ---
 
 ## 开发规范
 
-### 代码风格
-
-- **Java**: 遵循 Android 官方代码风格指南
-- **JavaScript/TypeScript**: 遵循 React Native 社区规范
-- **文件命名**: PascalCase 用于类文件，camelCase 用于方法和变量
-
-### 包结构
-
-Android 应用采用模块化包结构：
-
-```
-mindrift.app.musiclite/
-├── ui/           # UI 相关组件
-├── wearable/     # 小米穿戴集成
-├── core/         # 核心功能
-│   ├── cache/    # 缓存
-│   ├── engine/   # 执行引擎
-│   ├── network/  # 网络请求
-│   ├── proxy/    # 请求代理
-│   └── script/   # 脚本管理
-├── model/        # 数据模型
-└── utils/        # 工具类
-```
-
-### 命名约定
-
-- **类名**: PascalCase (例如: `ScriptManager`)
-- **方法名**: camelCase (例如: `getScriptById`)
-- **常量**: UPPER_SNAKE_CASE (例如: `CACHE_EXPIRY_HOURS`)
-- **私有成员**: camelCase 前缀 `m` (例如: `mContext`)
-
-### 版本控制
-
-- 主分支: `main`
-- 提交信息: 清晰、简洁、描述变更原因
-- 分支策略: 功能分支 (feature/)、修复分支 (fix/)
-
-### 测试
-
-- **单元测试**: 使用 JUnit
-- **Android 测试**: 使用 AndroidJUnit4
-- **测试命令**:
-  ```powershell
-  # Android 应用
-  gradlew.bat test
-  gradlew.bat connectedAndroidTest
-
-  # React Native 应用
-  npm run lint
-  ```
-
-### 构建差异
-
-| 特性 | Debug | Release |
-|------|-------|---------|
-| **Android 应用** |
-| Minification | 禁用 | 启用 |
-| ProGuard | 不应用 | 应用 |
-| Signing | Debug keystore | Release keystore |
-| **React Native 应用** |
-| Metro Bundler | 实时重载 | 打包 JS |
-| ProGuard | 禁用 | 启用 |
-| APK Splitting | 是 | 是 |
-| Universal APK | 生成 | 生成 |
-
----
-
-## 核心模块
-
-### XiaomiWearableManager
-
-**路径**: `app/src/main/java/mindrift/app/lisynchronization/wearable/XiaomiWearableManager.java`
-
-**职责**: 负责与小米穿戴设备通信
-
-**功能**:
-- 监听设备连接状态
-- 接收来自手表的 JSON 请求
-- 发送响应回手表
-- 管理权限申请
-
-**关键 API**:
-```java
-// 监听消息
-messageApi.addListener(nodeId, messageListener);
-// 发送消息
-messageApi.sendMessage(nodeId, data);
-```
-
-### RequestProxy
-
-**路径**: `app/src/main/java/mindrift/app/lisynchronization/core/proxy/RequestProxy.java`
-
-**职责**: 核心请求处理模块
-
-**功能**:
-- 缓存检查（4小时过期）
-- 路由策略（指定脚本 vs 轮询负载均衡）
-- 调用脚本执行器
-
-**路由逻辑**:
-```java
-if (request.getTargetScriptId() != null && !request.getTargetScriptId().isEmpty()) {
-    // 指定模式
-    provider = scriptManager.getHandlerById(source, targetScriptId);
-} else {
-    // 轮询模式
-    provider = scriptManager.getNextHandler(source);
-}
-```
-
-### ScriptManager
-
-**路径**: `app/src/main/java/mindrift/app/lisynchronization/core/script/ScriptManager.java`
-
-**职责**: 脚本管理模块
-
-**功能**:
-- 从本地文件或 URL 加载音源脚本
-- 解析脚本元数据
-- 注册脚本支持的音源
-- 轮询索引管理
-
-### ScriptContext
-
-**路径**: `app/src/main/java/mindrift/app/lisynchronization/core/script/ScriptContext.java`
-
-**职责**: QuickJS JavaScript 执行环境
-
-**功能**:
-- 初始化 JS 上下文
-- 注入 native API
-- 异步结果等待机制
-- 脚本生命周期管理
-
-### LxNativeImpl
-
-**路径**: `app/src/main/java/mindrift/app/lisynchronization/core/engine/LxNativeImpl.java`
-
-**职责**: LxObject 原生实现
-
-**功能**:
-- 提供 lx.request() 网络请求
-- 加密工具（AES/RSA/MD5）
-- Buffer 操作
-- zlib 压缩/解压
-
-### CacheManager
-
-**路径**: `app/src/main/java/mindrift/app/lisynchronization/core/cache/CacheManager.java`
-
-**职责**: 缓存管理模块
-
-**功能**:
-- 内存 + 文件持久化
-- 4小时过期时间
-- 定期清理过期缓存
-
-### HttpClient
-
-**路径**: `app/src/main/java/mindrift/app/lisynchronization/core/network/HttpClient.java`
-
-**职责**: 网络请求封装
-
-**功能**:
-- 基于 OkHttp
-- 支持 GET/POST/PUT/DELETE
-- 支持 body/form/formData
-- 同步/异步请求
-
----
-
-## 支持的音源平台
-
-根据代码分析，支持以下音乐平台：
-
-| 平台代码 | 平台名称 |
-|---------|---------|
-| tx | 腾讯音乐 |
-| wy | 网易云音乐 |
-| kg | 酷狗音乐 |
-| kw | 酷我音乐 |
-| mg | 咪咕音乐 |
-
-### 支持的操作类型
-
-- `musicUrl`: 获取音乐播放链接
-- `lyric`: 获取歌词
-- `pic`: 获取封面图片
-
----
-
-## 数据流
-
-### 请求消息格式
-
-```json
-{
-  "platform": "tx",
-  "songid": "123456",
-  "quality": "320k",
-  "action": "musicUrl",
-  "nocache": false,
-  "targetScriptId": "user_script_v1.js"
-}
-```
-
-**字段说明**:
-- `platform`: 音乐平台代码
-- `songid`: 歌曲ID
-- `quality`: 音质（如: 128k, 320k, flac）
-- `action`: 操作类型（musicUrl/lyric/pic）
-- `nocache`: 是否跳过缓存
-- `targetScriptId`: 指定脚本ID（可选）
-
-### 响应消息格式
-
-```json
-{
-  "data": "https://example.com/music.mp3",
-  "provider": "user_script_v1.js",
-  "url": "https://example.com/music.mp3"
-}
-```
-
-**字段说明**:
-- `data`: 返回的数据（URL/歌词/图片）
-- `provider`: 提供服务的脚本ID
-- `url`: 链接地址
-
----
-
-## 关键配置文件
-
-| 文件路径 | 作用 |
-|---------|------|
-| `settings.gradle` | Gradle 项目设置，定义模块 |
-| `gradle/libs.versions.toml` | 版本目录，管理依赖版本 |
-| `app/build.gradle` | Android 应用构建配置，依赖管理 |
-| `app/src/main/AndroidManifest.xml` | 应用清单，权限声明 |
-| `app/proguard-rules.pro` | ProGuard 混淆规则 |
-| `plan.md` | 项目详细实施计划文档 |
-| `小米穿戴第三方APP能力开放接口文档_1.4.txt` | 小米穿戴 SDK API 文档 |
-| `server_able_run.js` | Node.js 版本中间件服务器（参考实现） |
-
----
-
-## 小米穿戴 SDK 集成
-
-### 主要 API
-
-- **NodeApi**: 设备管理（连接、断开）
-- **MessageApi**: 消息通信（发送、接收）
-- **AuthApi**: 权限管理
-
-### 所需权限
-
-```xml
-<uses-permission android:name="com.xiaomi.xms.permission.DEVICE_MANAGER" />
-```
-
-### 兼容性
-
-- 支持 Android R (API 30) 及以上版本
-- 小米穿戴 SDK 版本 1.4
-
-### 测试流程
-
-1. 安装手表端快应用
-2. 安装手机端应用
-3. 权限申请
-4. 消息收发测试
-
----
-
-## 依赖管理
-
-### Android 应用核心依赖
-
-```gradle
-// QuickJS JavaScript 引擎
-implementation 'wang.harlon.quickjs:wrapper-android:2.4.0'
-
-// 网络请求
-implementation 'com.squareup.okhttp3:okhttp:4.12.0'
-
-// JSON 处理
-implementation 'com.google.code.gson:gson:2.10.1'
-
-// 数据库/缓存
-implementation 'androidx.room:room-runtime:2.6.1'
-
-// 生命周期
-implementation 'androidx.lifecycle:lifecycle-common-java8:2.8.7'
-
-// 小米穿戴 SDK
-implementation fileTree(dir: "libs", include: ["*.jar", "*.aar"])
-```
-
-### React Native 应用关键依赖
-
-```json
-{
-  "react-native": "0.73.11",
-  "react-native-navigation": "7.39.2",
-  "react-native-track-player": "..."
-}
-```
-
----
-
-## 注意事项
-
-1. **两个独立应用**: `app/` 和 `lx-music-mobile/` 是两个完全独立的应用，需要分别构建
-2. **QuickJS 内存管理**: 执行 JavaScript 脚本时注意内存泄漏
-3. **缓存策略**: 默认缓存时间为4小时，可在 `CacheManager` 中调整
-4. **负载均衡**: 轮询模式下，脚本按照注册顺序循环执行
-5. **权限申请**: 小米穿戴功能需要用户授权
-6. **签名配置**: Release 构建需要配置签名密钥
+* Java：遵循 Android 官方代码风格。
+* 命名：
+
+  * 类名 PascalCase
+  * 方法/变量 camelCase
+  * 常量 UPPER\_SNAKE\_CASE
+  * 私有成员前缀 `m`
+
+* 包结构（核心）：`mindrift.app.music.\*`
 
 ---
 
 ## 相关文档
 
-- `plan.md` - 项目详细实施计划
-- `小米穿戴第三方APP能力开放接口文档_1.4.txt` - SDK API 文档
-- `interconnect测试.txt` - 互联互通测试文档
-- `AGENTS.md` - 本文档
+* `docs/LiSync\_Protocol\_Spec.md` - 通信协议规范
+* `docs/vela\_quickapp\_integration.md` - 手表快应用接入指南
+* `docs/custom\_source.md` - 自定义音源脚本说明
+* `GEMINI.md` - 项目生态与参考说明
+* `plan.md` - 项目实施计划
+* `sl.md` - 搜索/歌词逻辑参考
+* `interconnect测试.pdf` / `interconnect测试.txt` - 互联互通测试
+* `小米穿戴第三方APP能力开放接入文档.*` - SDK 接入文档
+* `小米穿戴第三方APP能力开放接口文档\_1.4.\*` - SDK 文档
 
 ---
 
 ## 快速开始
 
-### 构建 Android 应用
-
 ```powershell
-cd F:\Project\LiSynchronization
-gradlew.bat clean
+cd F:\\Project\\LiSynchronization
 gradlew.bat assembleDebug
-```
-
-### 构建 React Native 应用
-
-```powershell
-cd F:\Project\LiSynchronization\lx-music-mobile
-npm install
-npm run pack:android
-```
-
-### 安装到设备
-
-```powershell
-# Android 应用
-gradlew.bat installDebug
-
-# React Native 应用
-cd lx-music-mobile
-npm run dev
 ```
 
 ---
 
-**最后更新**: 2026-01-31
-**维护者**: LiSynchronization Team
+**最后更新**: 2026-02-04  
+**维护者**: Mindrift Team
