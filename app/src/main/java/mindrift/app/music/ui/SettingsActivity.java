@@ -97,6 +97,7 @@ public class SettingsActivity extends AppCompatActivity {
         MaterialButton cacheClearButton = findViewById(R.id.button_cache_clear);
         MaterialButton testButton = findViewById(R.id.button_test_request);
         MaterialButton openSearchPlayButton = findViewById(R.id.button_open_search_play);
+        MaterialButton openThemeTransferButton = findViewById(R.id.button_open_theme_transfer);
         TextView copyLogsButton = findViewById(R.id.button_copy_logs);
         TextView clearLogsButton = findViewById(R.id.button_clear_logs);
 
@@ -107,6 +108,7 @@ public class SettingsActivity extends AppCompatActivity {
         });
         testButton.setOnClickListener(v -> runTestRequest());
         openSearchPlayButton.setOnClickListener(v -> startActivity(new Intent(this, SearchPlayActivity.class)));
+        openThemeTransferButton.setOnClickListener(v -> startActivity(new Intent(this, ThemeTransferActivity.class)));
         copyLogsButton.setOnClickListener(v -> copyLogs());
         clearLogsButton.setOnClickListener(v -> {
             AppLogBuffer.clear();

@@ -37,6 +37,7 @@
     <string name="action_test_request">发起调试</string>
     <string name="action_open_settings">设置</string>
     <string name="action_open_search_play">搜索播放测试</string>
+    <string name="action_open_theme_transfer">主题传输</string>
     <string name="action_edit_script">编辑</string>
     <string name="action_rename_script">重命名</string>
     <string name="action_delete_script">删除</string>
@@ -148,6 +149,35 @@
     <string name="search_play_lyrics_placeholder">歌词将在此显示</string>
     <string name="search_play_lyrics_loading">歌词加载中...</string>
     <string name="search_play_lyrics_empty">暂无歌词</string>
+
+    <string name="theme_transfer_title">主题传输</string>
+    <string name="theme_transfer_section_pick">主题目录</string>
+    <string name="theme_transfer_section_options">传输设置</string>
+    <string name="theme_transfer_section_status">传输状态</string>
+    <string name="theme_transfer_action_pick">选择主题目录</string>
+    <string name="theme_transfer_action_start">开始传输</string>
+    <string name="theme_transfer_action_cancel">取消传输</string>
+    <string name="theme_transfer_hint_theme_id">主题 ID</string>
+    <string name="theme_transfer_path_placeholder">未选择主题目录</string>
+    <string name="theme_transfer_name_placeholder">主题名称: -</string>
+    <string name="theme_transfer_name_format">主题名称: %1$s</string>
+    <string name="theme_transfer_summary_placeholder">尚未解析主题</string>
+    <string name="theme_transfer_summary_format">文件: %1$d  总大小: %2$s  分片: %3$d</string>
+    <string name="theme_transfer_status_idle">等待开始</string>
+    <string name="theme_transfer_status_preparing">解析主题中...</string>
+    <string name="theme_transfer_status_ready">主题已就绪</string>
+    <string name="theme_transfer_status_sending">正在传输...</string>
+    <string name="theme_transfer_status_finished">传输完成</string>
+    <string name="theme_transfer_status_failed">传输失败: %1$s</string>
+    <string name="theme_transfer_status_cancelled">传输已取消</string>
+    <string name="theme_transfer_progress_format">进度: %1$d%% (%2$d/%3$d)</string>
+    <string name="theme_transfer_progress_placeholder">进度: 0% (0/0)</string>
+    <string name="theme_transfer_switch_open">打开手表接收页</string>
+    <string name="theme_transfer_switch_open_desc">可选，打开后手表端会进入主题接收页面。</string>
+    <string name="theme_transfer_switch_clean">清空旧主题目录</string>
+    <string name="theme_transfer_switch_clean_desc">开始传输前删除旧主题目录。</string>
+    <string name="theme_transfer_invalid_id">主题 ID 不合法: %1$s</string>
+    <string name="theme_transfer_no_device">未连接设备，无法传输</string>
 
     <string name="action_music_url">播放链接 (musicUrl)</string>
     <string name="action_search">搜索 (search)</string>

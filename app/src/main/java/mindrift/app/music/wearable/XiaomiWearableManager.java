@@ -22,8 +22,11 @@ import com.xiaomi.xms.wearable.service.OnServiceConnectionListener;
 import com.xiaomi.xms.wearable.service.ServiceApi;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageInfo;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -34,6 +37,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 import mindrift.app.music.core.lyric.LyricService;
 import mindrift.app.music.core.script.ScriptManager;
 import mindrift.app.music.core.search.SearchService;
@@ -57,9 +61,19 @@ public class XiaomiWearableManager {
     private static final String ACTION_UPLOAD_FINISH = "upload.finish";
     private static final String ACTION_UPLOAD_ACK = "upload.ack";
     private static final String ACTION_UPLOAD_RESULT = "upload.result";
+    private static final String ACTION_THEME_OPEN = "theme.open";
+    private static final String ACTION_THEME_INIT = "theme.init";
+    private static final String ACTION_THEME_FILE_START = "theme.file.start";
+    private static final String ACTION_THEME_FILE_CHUNK = "theme.file.chunk";
+    private static final String ACTION_THEME_FILE_FINISH = "theme.file.finish";
+    private static final String ACTION_THEME_FINISH = "theme.finish";
+    private static final String ACTION_THEME_CANCEL = "theme.cancel";
     private static final long MAX_UPLOAD_SIZE = 5 * 1024 * 1024L;
     private static final int UPLOAD_CHUNK_SIZE = 8 * 1024;
     private static final long UPLOAD_TIMEOUT_MS = 30000L;
+    private static final int THEME_CHUNK_SIZE = 8 * 1024;
+    private static final long THEME_TIMEOUT_MS = 30000L;
+    private static final Pattern THEME_ID_PATTERN = Pattern.compile("^[a-z0-9_-]{1,32}$");
     private static final Permission[] REQUIRED_PERMISSIONS = new Permission[]{
             Permission.DEVICE_MANAGER,
             Permission.NOTIFY
@@ -98,6 +112,9 @@ public class XiaomiWearableManager {
     private static final long MIN_REFRESH_INTERVAL_MS = 3000L;
     private ScheduledFuture<?> reconnectFuture;
     private final Map<String, UploadSession> uploadSessions = new ConcurrentHashMap<>();
+    private final Map<String, ThemeTransferSession> themeRequestMap = new ConcurrentHashMap<>();
+    private final Object themeLock = new Object();
+    private volatile ThemeTransferSession activeThemeSession;
     private static final String DEFAULT_WEAR_APP_URI = "/pages/init";
 
     private final OnServiceConnectionListener serviceConnectionListener = new OnServiceConnectionListener() {
@@ -212,6 +229,7 @@ public class XiaomiWearableManager {
             }
         }
         uploadSessions.clear();
+        clearThemeSessions();
         searchService.shutdown();
         lyricService.shutdown();
         executor.shutdownNow();
@@ -389,6 +407,10 @@ public class XiaomiWearableManager {
             }
             if (isUploadAction(action)) {
                 handleUploadResponse(action, json, requestId);
+                return;
+            }
+            if (isThemeAction(action)) {
+                handleThemeResponse(action, json, requestId);
                 return;
             }
             if (ACTION_SEARCH.equalsIgnoreCase(action)) {
@@ -820,6 +842,12 @@ public class XiaomiWearableManager {
                 || ACTION_UPLOAD_RESULT.equalsIgnoreCase(action);
     }
 
+    private boolean isThemeAction(String action) {
+        if (action == null) return false;
+        String lower = action.toLowerCase(java.util.Locale.US);
+        return lower.startsWith("theme.") && lower.endsWith(".result");
+    }
+
     private String withRequestId(String responseJson, String requestId) {
         if (requestId == null || requestId.isEmpty()) return responseJson;
         if (responseJson == null || responseJson.trim().isEmpty()) {
@@ -909,6 +937,57 @@ public class XiaomiWearableManager {
         void onProgress(int percent);
         void onSuccess(String fileId, String message);
         void onFailure(String message);
+    }
+
+    public interface ThemeTransferCallback {
+        void onStatus(String message);
+        void onProgress(int percent, int filesSent, int totalFiles);
+        void onSuccess(String themeId);
+        void onFailure(String message);
+    }
+
+    public static class ThemeTransferOptions {
+        public boolean openPage = true;
+        public boolean clean = true;
+        public String themeIdOverride;
+    }
+
+    public static class ThemeInfo {
+        private final String themeId;
+        private final String themeName;
+        private final int fileCount;
+        private final long totalBytes;
+        private final int totalChunks;
+        private final List<ThemeFile> files;
+
+        ThemeInfo(String themeId, String themeName, int fileCount, long totalBytes, int totalChunks, List<ThemeFile> files) {
+            this.themeId = themeId;
+            this.themeName = themeName;
+            this.fileCount = fileCount;
+            this.totalBytes = totalBytes;
+            this.totalChunks = totalChunks;
+            this.files = files;
+        }
+
+        public String getThemeId() {
+            return themeId;
+        }
+
+        public String getThemeName() {
+            return themeName;
+        }
+
+        public int getFileCount() {
+            return fileCount;
+        }
+
+        public long getTotalBytes() {
+            return totalBytes;
+        }
+
+        public int getTotalChunks() {
+            return totalChunks;
+        }
     }
 
     public void uploadMusic(Uri uri, UploadCallback callback) {
@@ -1043,6 +1122,28 @@ public class XiaomiWearableManager {
         }
     }
 
+    private void handleThemeResponse(String action, JsonObject json, String requestId) {
+        if (json == null || requestId == null || requestId.isEmpty()) return;
+        ThemeTransferSession session = themeRequestMap.remove(requestId);
+        if (session == null) return;
+        boolean ok = getBoolean(json, "ok");
+        String message = getString(json, "message");
+        String path = getString(json, "path");
+        String fileId = getString(json, "fileId");
+        String themeId = getString(json, "themeId");
+        Logger.info("Theme response: action=" + action + " ok=" + ok + " themeId=" + themeId + " fileId=" + fileId + " path=" + path);
+        ThemeResult result = new ThemeResult(ok, message, action);
+        session.setResult(requestId, result);
+        if (!ok) {
+            String lowerAction = action == null ? "" : action.toLowerCase(java.util.Locale.US);
+            if (lowerAction.startsWith("theme.open") || lowerAction.startsWith("theme.cancel")) {
+                return;
+            }
+            String reason = message == null || message.trim().isEmpty() ? "主题传输失败" : message.trim();
+            session.fail(reason);
+        }
+    }
+
     private void scheduleUploadTimeout(String fileId) {
         UploadSession session = uploadSessions.get(fileId);
         if (session == null) return;
@@ -1063,6 +1164,570 @@ public class XiaomiWearableManager {
         if (callback != null) {
             callback.onFailure(message);
         }
+    }
+
+    public static boolean isValidThemeId(String themeId) {
+        if (themeId == null) return false;
+        return THEME_ID_PATTERN.matcher(themeId.trim()).matches();
+    }
+
+    public ThemeInfo inspectTheme(Uri treeUri) throws ThemeTransferException {
+        return buildThemeInfo(treeUri);
+    }
+
+    public void transferTheme(ThemeInfo info, ThemeTransferOptions options, ThemeTransferCallback callback) {
+        if (uploadExecutor.isShutdown()) {
+            notifyThemeFailure(callback, "服务已关闭");
+            return;
+        }
+        uploadExecutor.execute(() -> {
+            if (!serviceConnected) {
+                notifyThemeFailure(callback, "服务未连接");
+                return;
+            }
+            String nodeId = getCurrentNodeId();
+            if (nodeId == null || nodeId.isEmpty()) {
+                notifyThemeFailure(callback, "未连接设备");
+                return;
+            }
+            if (info == null || info.files == null || info.files.isEmpty()) {
+                notifyThemeFailure(callback, "未选择主题目录");
+                return;
+            }
+            ThemeTransferOptions actualOptions = options == null ? new ThemeTransferOptions() : options;
+            String themeId = resolveThemeId(info, actualOptions);
+            if (!isValidThemeId(themeId)) {
+                notifyThemeFailure(callback, "主题 ID 不合法: " + themeId);
+                return;
+            }
+            ThemeTransferSession session = new ThemeTransferSession(themeId, callback, info.fileCount, info.totalBytes);
+            if (!registerThemeSession(session)) {
+                notifyThemeFailure(callback, "已有主题传输任务进行中");
+                return;
+            }
+            boolean started = false;
+            try {
+                notifyThemeStatus(session, "准备传输主题");
+                if (actualOptions.openPage) {
+                    String openId = buildThemeRequestId("theme_open");
+                    registerThemeRequest(session, openId);
+                    sendMessage(nodeId, gson.toJson(buildThemeOpenPayload(openId, themeId)));
+                }
+
+                String initId = buildThemeRequestId("theme_init");
+                registerThemeRequest(session, initId);
+                sendMessage(nodeId, gson.toJson(buildThemeInitPayload(initId, themeId, info.fileCount, info.totalChunks, info.totalBytes, actualOptions.clean)));
+                ThemeResult initResult = awaitThemeResult(session, initId, THEME_TIMEOUT_MS);
+                if (initResult == null) {
+                    notifyThemeFailure(session, "主题初始化超时");
+                    return;
+                }
+                if (!initResult.ok) {
+                    String msg = initResult.message == null || initResult.message.trim().isEmpty()
+                            ? "主题初始化失败"
+                            : initResult.message.trim();
+                    notifyThemeFailure(session, msg);
+                    return;
+                }
+
+                started = true;
+                notifyThemeStatus(session, "开始发送主题文件");
+                long sentBytes = 0L;
+                int filesSent = 0;
+                int totalFiles = info.fileCount;
+                boolean useBytes = info.totalBytes > 0;
+                int[] lastPercent = new int[]{-1};
+
+                for (ThemeFile file : info.files) {
+                    if (shouldAbortTheme(session)) {
+                        break;
+                    }
+                    if (file.size <= 0) {
+                        byte[] data = readThemeBytes(file.file);
+                        if (data == null) {
+                            notifyThemeFailure(session, "读取主题文件失败: " + file.path);
+                            break;
+                        }
+                        file.cached = data;
+                        file.size = data.length;
+                        file.totalChunks = Math.max(1, (int) ((data.length + (THEME_CHUNK_SIZE - 1)) / THEME_CHUNK_SIZE));
+                    }
+                    String fileId = "f" + (filesSent + 1);
+                    String startId = buildThemeRequestId("theme_file_start");
+                    registerThemeRequest(session, startId);
+                    sendMessage(nodeId, gson.toJson(buildThemeFileStartPayload(startId, fileId, themeId, file.path, file.size, file.totalChunks)));
+
+                    if (file.cached != null) {
+                        sentBytes = sendThemeChunksFromMemory(nodeId, session, file, themeId, fileId, sentBytes, useBytes,
+                                info.totalBytes, filesSent, totalFiles, lastPercent);
+                    } else {
+                        sentBytes = sendThemeChunksFromStream(nodeId, session, file, themeId, fileId, sentBytes, useBytes,
+                                info.totalBytes, filesSent, totalFiles, lastPercent);
+                    }
+
+                    String finishId = buildThemeRequestId("theme_file_finish");
+                    registerThemeRequest(session, finishId);
+                    sendMessage(nodeId, gson.toJson(buildThemeFileFinishPayload(finishId, fileId, themeId, file.path)));
+                    filesSent++;
+                    if (!useBytes) {
+                        reportThemeProgress(session, filesSent, totalFiles, 0, 0, lastPercent);
+                    }
+                }
+
+                if (shouldAbortTheme(session)) {
+                    notifyThemeFailure(session, session.failureMessage == null ? "主题传输已取消" : session.failureMessage);
+                    return;
+                }
+
+                String finishId = buildThemeRequestId("theme_finish");
+                registerThemeRequest(session, finishId);
+                sendMessage(nodeId, gson.toJson(buildThemeFinishPayload(finishId, themeId)));
+                ThemeResult finishResult = awaitThemeResult(session, finishId, THEME_TIMEOUT_MS);
+                if (finishResult == null) {
+                    notifyThemeFailure(session, "主题传输完成确认超时");
+                    return;
+                }
+                if (!finishResult.ok) {
+                    String msg = finishResult.message == null || finishResult.message.trim().isEmpty()
+                            ? "主题传输失败"
+                            : finishResult.message.trim();
+                    notifyThemeFailure(session, msg);
+                    return;
+                }
+                notifyThemeSuccess(session);
+            } catch (ThemeTransferException e) {
+                if (session.failureMessage == null) {
+                    notifyThemeFailure(session, e.getMessage());
+                }
+            } catch (Exception e) {
+                if (session.failureMessage == null) {
+                    notifyThemeFailure(session, "主题传输异常: " + e.getMessage());
+                }
+            } finally {
+                if (started && shouldAbortTheme(session)) {
+                    sendThemeCancelInternal(nodeId, actualOptions.clean);
+                }
+                unregisterThemeSession(session);
+            }
+        });
+    }
+
+    public void cancelThemeTransfer(boolean clean) {
+        ThemeTransferSession session = activeThemeSession;
+        if (session == null) return;
+        session.cancel("已取消主题传输");
+        String nodeId = getCurrentNodeId();
+        if (nodeId != null && !nodeId.isEmpty()) {
+            sendThemeCancelInternal(nodeId, clean);
+        }
+    }
+
+    private void sendThemeCancelInternal(String nodeId, boolean clean) {
+        ThemeTransferSession session = activeThemeSession;
+        if (session != null && session.cancelSent) {
+            return;
+        }
+        String cancelId = buildThemeRequestId("theme_cancel");
+        if (session != null) {
+            session.cancelSent = true;
+            registerThemeRequest(session, cancelId);
+        }
+        sendMessage(nodeId, gson.toJson(buildThemeCancelPayload(cancelId, clean)));
+    }
+
+    private ThemeInfo buildThemeInfo(Uri treeUri) throws ThemeTransferException {
+        if (treeUri == null) {
+            throw new ThemeTransferException("未选择主题目录");
+        }
+        DocumentFile root = DocumentFile.fromTreeUri(context, treeUri);
+        if (root == null || !root.isDirectory()) {
+            throw new ThemeTransferException("无法读取主题目录");
+        }
+        List<ThemeFile> files = new ArrayList<>();
+        collectThemeFiles(root, "", files);
+        if (files.isEmpty()) {
+            throw new ThemeTransferException("主题目录为空");
+        }
+        files.sort((a, b) -> {
+            if ("theme.json".equalsIgnoreCase(a.path)) return -1;
+            if ("theme.json".equalsIgnoreCase(b.path)) return 1;
+            return a.path.compareToIgnoreCase(b.path);
+        });
+        ThemeFile themeJson = findThemeJson(files);
+        if (themeJson == null) {
+            throw new ThemeTransferException("缺少 theme.json");
+        }
+        ThemeMeta meta = readThemeMeta(themeJson);
+        String themeId = meta == null ? null : meta.id;
+        String themeName = meta == null ? null : meta.name;
+        if (themeId == null || themeId.trim().isEmpty()) {
+            themeId = root.getName();
+        }
+        if (themeId == null) themeId = "";
+        themeId = themeId.trim();
+
+        long totalBytes = 0L;
+        int totalChunks = 0;
+        for (ThemeFile file : files) {
+            totalBytes += Math.max(0L, file.size);
+            totalChunks += Math.max(1, file.totalChunks);
+        }
+        return new ThemeInfo(themeId, themeName, files.size(), totalBytes, totalChunks, files);
+    }
+
+    private void collectThemeFiles(DocumentFile dir, String prefix, List<ThemeFile> out) throws ThemeTransferException {
+        if (dir == null || out == null) return;
+        DocumentFile[] children = dir.listFiles();
+        if (children == null) return;
+        for (DocumentFile child : children) {
+            if (child == null) continue;
+            String name = child.getName();
+            if (name == null || name.trim().isEmpty()) continue;
+            String relative = prefix.isEmpty() ? name : prefix + "/" + name;
+            relative = normalizeThemePath(relative);
+            if (isInvalidThemePath(relative)) {
+                throw new ThemeTransferException("非法路径: " + relative);
+            }
+            if (child.isDirectory()) {
+                collectThemeFiles(child, relative, out);
+            } else if (child.isFile()) {
+                ThemeFile file = new ThemeFile(relative, child);
+                out.add(file);
+            }
+        }
+    }
+
+    private String normalizeThemePath(String path) {
+        if (path == null) return "";
+        String normalized = path.replace("\\", "/");
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        if (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        return normalized;
+    }
+
+    private boolean isInvalidThemePath(String path) {
+        if (path == null || path.trim().isEmpty()) return true;
+        String value = path.trim();
+        if (value.startsWith("/") || value.startsWith("\\") || value.startsWith("internal://")) return true;
+        return value.contains("..");
+    }
+
+    private ThemeFile findThemeJson(List<ThemeFile> files) {
+        if (files == null) return null;
+        for (ThemeFile file : files) {
+            if ("theme.json".equalsIgnoreCase(file.path)) {
+                return file;
+            }
+        }
+        return null;
+    }
+
+    private ThemeMeta readThemeMeta(ThemeFile themeJson) {
+        if (themeJson == null) return null;
+        try {
+            byte[] data = themeJson.cached != null ? themeJson.cached : readThemeBytes(themeJson.file);
+            if (data == null || data.length == 0) return null;
+            String content = new String(data, StandardCharsets.UTF_8);
+            JsonObject obj = gson.fromJson(content, JsonObject.class);
+            if (obj == null) return null;
+            String id = getString(obj, "id");
+            String name = getString(obj, "name");
+            if (themeJson.cached == null) {
+                themeJson.cached = data;
+                themeJson.size = data.length;
+                themeJson.totalChunks = Math.max(1, (int) ((data.length + (THEME_CHUNK_SIZE - 1)) / THEME_CHUNK_SIZE));
+            }
+            return new ThemeMeta(id, name);
+        } catch (Exception e) {
+            Logger.warn("Read theme.json failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private byte[] readThemeBytes(DocumentFile file) throws ThemeTransferException {
+        if (file == null) return null;
+        try (InputStream input = context.getContentResolver().openInputStream(file.getUri())) {
+            if (input == null) return null;
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+                if (output.size() > (MAX_UPLOAD_SIZE * 2)) {
+                    throw new ThemeTransferException("主题文件过大: " + file.getName());
+                }
+            }
+            return output.toByteArray();
+        } catch (ThemeTransferException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ThemeTransferException("读取主题文件失败: " + e.getMessage());
+        }
+    }
+
+    private long sendThemeChunksFromMemory(String nodeId, ThemeTransferSession session, ThemeFile file, String themeId,
+                                           String fileId, long sentBytes, boolean useBytes, long totalBytes,
+                                           int filesSent, int totalFiles, int[] lastPercent) throws ThemeTransferException {
+        byte[] data = file.cached;
+        if (data == null) {
+            data = readThemeBytes(file.file);
+        }
+        if (data == null) {
+            throw new ThemeTransferException("读取主题文件失败: " + file.path);
+        }
+        int total = Math.max(1, (int) ((data.length + (THEME_CHUNK_SIZE - 1)) / THEME_CHUNK_SIZE));
+        for (int index = 0; index < total; index++) {
+            if (shouldAbortTheme(session)) {
+                return sentBytes;
+            }
+            int start = index * THEME_CHUNK_SIZE;
+            int end = Math.min(start + THEME_CHUNK_SIZE, data.length);
+            byte[] chunk = Arrays.copyOfRange(data, start, end);
+            String base64 = android.util.Base64.encodeToString(chunk, android.util.Base64.NO_WRAP);
+            sendMessage(nodeId, gson.toJson(buildThemeFileChunkPayload(fileId, themeId, file.path, index + 1, total, base64)));
+            sentBytes += chunk.length;
+            if (useBytes) {
+                reportThemeProgress(session, filesSent, totalFiles, sentBytes, totalBytes, lastPercent);
+            }
+            SystemClock.sleep(4);
+        }
+        return sentBytes;
+    }
+
+    private long sendThemeChunksFromStream(String nodeId, ThemeTransferSession session, ThemeFile file, String themeId,
+                                           String fileId, long sentBytes, boolean useBytes, long totalBytes,
+                                           int filesSent, int totalFiles, int[] lastPercent) throws ThemeTransferException {
+        try (InputStream input = context.getContentResolver().openInputStream(file.file.getUri())) {
+            if (input == null) {
+                throw new ThemeTransferException("读取主题文件失败: " + file.path);
+            }
+            byte[] buffer = new byte[THEME_CHUNK_SIZE];
+            int read;
+            int index = 0;
+            int total = Math.max(1, file.totalChunks);
+            while ((read = input.read(buffer)) != -1) {
+                if (shouldAbortTheme(session)) {
+                    return sentBytes;
+                }
+                index++;
+                byte[] chunk = read == buffer.length ? buffer : Arrays.copyOf(buffer, read);
+                String base64 = android.util.Base64.encodeToString(chunk, android.util.Base64.NO_WRAP);
+                sendMessage(nodeId, gson.toJson(buildThemeFileChunkPayload(fileId, themeId, file.path, index, total, base64)));
+                sentBytes += read;
+                if (useBytes) {
+                    reportThemeProgress(session, filesSent, totalFiles, sentBytes, totalBytes, lastPercent);
+                }
+                SystemClock.sleep(4);
+            }
+            if (index == 0) {
+                String base64 = android.util.Base64.encodeToString(new byte[0], android.util.Base64.NO_WRAP);
+                sendMessage(nodeId, gson.toJson(buildThemeFileChunkPayload(fileId, themeId, file.path, 1, 1, base64)));
+            }
+            return sentBytes;
+        } catch (ThemeTransferException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ThemeTransferException("读取主题文件失败: " + file.path);
+        }
+    }
+
+    private boolean registerThemeSession(ThemeTransferSession session) {
+        synchronized (themeLock) {
+            if (activeThemeSession != null) {
+                return false;
+            }
+            activeThemeSession = session;
+            return true;
+        }
+    }
+
+    private void unregisterThemeSession(ThemeTransferSession session) {
+        synchronized (themeLock) {
+            if (activeThemeSession == session) {
+                activeThemeSession = null;
+            }
+        }
+        clearThemeRequests(session);
+    }
+
+    private void clearThemeSessions() {
+        ThemeTransferSession session = activeThemeSession;
+        if (session != null) {
+            session.cancel("服务已停止");
+        }
+        activeThemeSession = null;
+        themeRequestMap.clear();
+    }
+
+    private void clearThemeRequests(ThemeTransferSession session) {
+        if (session == null) return;
+        themeRequestMap.entrySet().removeIf(entry -> entry.getValue() == session);
+    }
+
+    private void registerThemeRequest(ThemeTransferSession session, String requestId) {
+        if (session == null || requestId == null || requestId.isEmpty()) return;
+        themeRequestMap.put(requestId, session);
+    }
+
+    private ThemeResult awaitThemeResult(ThemeTransferSession session, String requestId, long timeoutMs) {
+        if (session == null || requestId == null) return null;
+        long deadline = SystemClock.elapsedRealtime() + timeoutMs;
+        synchronized (session.lock) {
+            while (true) {
+                if (session.cancelled) {
+                    return null;
+                }
+                ThemeResult result = session.results.get(requestId);
+                if (result != null) {
+                    return result;
+                }
+                long wait = deadline - SystemClock.elapsedRealtime();
+                if (wait <= 0) {
+                    return null;
+                }
+                try {
+                    session.lock.wait(wait);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return null;
+                }
+            }
+        }
+    }
+
+    private boolean shouldAbortTheme(ThemeTransferSession session) {
+        if (session == null) return true;
+        return session.cancelled || session.failureMessage != null;
+    }
+
+    private void notifyThemeStatus(ThemeTransferSession session, String message) {
+        if (session == null || session.callback == null) return;
+        session.callback.onStatus(message);
+    }
+
+    private void notifyThemeFailure(ThemeTransferCallback callback, String message) {
+        if (callback != null) {
+            callback.onFailure(message);
+        }
+    }
+
+    private void notifyThemeFailure(ThemeTransferSession session, String message) {
+        if (session == null) return;
+        session.fail(message);
+        if (session.callback != null) {
+            session.callback.onFailure(message);
+        }
+    }
+
+    private void notifyThemeSuccess(ThemeTransferSession session) {
+        if (session == null) return;
+        if (session.callback != null) {
+            session.callback.onSuccess(session.themeId);
+        }
+    }
+
+    private void reportThemeProgress(ThemeTransferSession session, int filesSent, int totalFiles,
+                                     long sentBytes, long totalBytes, int[] lastPercent) {
+        if (session == null || session.callback == null) return;
+        if (totalFiles <= 0) totalFiles = 1;
+        int percent;
+        if (totalBytes > 0) {
+            percent = (int) Math.min(100, Math.round(sentBytes * 100.0 / totalBytes));
+        } else {
+            percent = (int) Math.min(100, Math.round(filesSent * 100.0 / totalFiles));
+        }
+        if (percent != lastPercent[0]) {
+            lastPercent[0] = percent;
+            session.callback.onProgress(percent, Math.min(filesSent, totalFiles), totalFiles);
+        }
+    }
+
+    private String resolveThemeId(ThemeInfo info, ThemeTransferOptions options) {
+        if (options != null && options.themeIdOverride != null && !options.themeIdOverride.trim().isEmpty()) {
+            return options.themeIdOverride.trim();
+        }
+        return info == null ? "" : info.themeId;
+    }
+
+    private String buildThemeRequestId(String prefix) {
+        return prefix + "_" + System.currentTimeMillis();
+    }
+
+    private Map<String, Object> buildThemeOpenPayload(String requestId, String themeId) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("action", ACTION_THEME_OPEN);
+        payload.put("_requestId", requestId);
+        payload.put("themeId", themeId);
+        return payload;
+    }
+
+    private Map<String, Object> buildThemeInitPayload(String requestId, String themeId, int totalFiles,
+                                                     int totalChunks, long totalBytes, boolean clean) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("action", ACTION_THEME_INIT);
+        payload.put("_requestId", requestId);
+        payload.put("themeId", themeId);
+        payload.put("totalFiles", totalFiles);
+        payload.put("totalChunks", totalChunks);
+        payload.put("totalBytes", totalBytes);
+        payload.put("clean", clean);
+        return payload;
+    }
+
+    private Map<String, Object> buildThemeFileStartPayload(String requestId, String fileId, String themeId,
+                                                           String path, long size, int totalChunks) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("action", ACTION_THEME_FILE_START);
+        payload.put("_requestId", requestId);
+        payload.put("fileId", fileId);
+        payload.put("themeId", themeId);
+        payload.put("path", path);
+        payload.put("size", size);
+        payload.put("totalChunks", totalChunks);
+        return payload;
+    }
+
+    private Map<String, Object> buildThemeFileChunkPayload(String fileId, String themeId, String path,
+                                                           int index, int total, String data) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("action", ACTION_THEME_FILE_CHUNK);
+        payload.put("fileId", fileId);
+        payload.put("themeId", themeId);
+        payload.put("path", path);
+        payload.put("index", index);
+        payload.put("total", total);
+        payload.put("data", data);
+        return payload;
+    }
+
+    private Map<String, Object> buildThemeFileFinishPayload(String requestId, String fileId, String themeId, String path) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("action", ACTION_THEME_FILE_FINISH);
+        payload.put("_requestId", requestId);
+        payload.put("fileId", fileId);
+        payload.put("themeId", themeId);
+        payload.put("path", path);
+        return payload;
+    }
+
+    private Map<String, Object> buildThemeFinishPayload(String requestId, String themeId) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("action", ACTION_THEME_FINISH);
+        payload.put("_requestId", requestId);
+        payload.put("themeId", themeId);
+        return payload;
+    }
+
+    private Map<String, Object> buildThemeCancelPayload(String requestId, boolean clean) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("action", ACTION_THEME_CANCEL);
+        payload.put("_requestId", requestId);
+        payload.put("clean", clean);
+        return payload;
     }
 
     private byte[] readBytes(Uri uri) {
@@ -1109,6 +1774,87 @@ public class XiaomiWearableManager {
         } catch (Exception e) {
             Logger.warn("Package check failed: " + packageName);
             return false;
+        }
+    }
+
+    private static class ThemeFile {
+        final String path;
+        final DocumentFile file;
+        long size;
+        int totalChunks;
+        byte[] cached;
+
+        ThemeFile(String path, DocumentFile file) {
+            this.path = path == null ? "" : path;
+            this.file = file;
+            long length = file == null ? 0L : file.length();
+            this.size = Math.max(0L, length);
+            this.totalChunks = this.size > 0 ? (int) ((this.size + (THEME_CHUNK_SIZE - 1)) / THEME_CHUNK_SIZE) : 1;
+        }
+    }
+
+    private static class ThemeMeta {
+        final String id;
+        final String name;
+
+        ThemeMeta(String id, String name) {
+            this.id = id;
+            this.name = name;
+        }
+    }
+
+    private static class ThemeResult {
+        final boolean ok;
+        final String message;
+        final String action;
+
+        ThemeResult(boolean ok, String message, String action) {
+            this.ok = ok;
+            this.message = message;
+            this.action = action;
+        }
+    }
+
+    private static class ThemeTransferSession {
+        final String themeId;
+        final ThemeTransferCallback callback;
+        final Object lock = new Object();
+        final Map<String, ThemeResult> results = new HashMap<>();
+        final int totalFiles;
+        final long totalBytes;
+        volatile boolean cancelled = false;
+        volatile boolean cancelSent = false;
+        volatile String failureMessage;
+
+        ThemeTransferSession(String themeId, ThemeTransferCallback callback, int totalFiles, long totalBytes) {
+            this.themeId = themeId;
+            this.callback = callback;
+            this.totalFiles = totalFiles;
+            this.totalBytes = totalBytes;
+        }
+
+        void setResult(String requestId, ThemeResult result) {
+            synchronized (lock) {
+                results.put(requestId, result);
+                lock.notifyAll();
+            }
+        }
+
+        void fail(String message) {
+            if (failureMessage == null || failureMessage.trim().isEmpty()) {
+                failureMessage = message;
+            }
+        }
+
+        void cancel(String message) {
+            cancelled = true;
+            fail(message);
+        }
+    }
+
+    public static class ThemeTransferException extends Exception {
+        ThemeTransferException(String message) {
+            super(message);
         }
     }
 
