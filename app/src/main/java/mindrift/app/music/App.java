@@ -14,9 +14,13 @@ import java.util.Deque;
 import mindrift.app.music.core.cache.CacheManager;
 import mindrift.app.music.core.proxy.RequestProxy;
 import mindrift.app.music.core.script.ScriptManager;
+import mindrift.app.music.service.KeepAliveService;
 import mindrift.app.music.ui.AgreementActivity;
 import mindrift.app.music.utils.Logger;
+import mindrift.app.music.utils.NotificationHelper;
 import mindrift.app.music.wearable.XiaomiWearableManager;
+import androidx.core.content.ContextCompat;
+import android.os.Build;
 
 public class App extends Application {
     private CacheManager cacheManager;
@@ -42,6 +46,7 @@ public class App extends Application {
         scriptManager.addUpdateAlertListener(this::handleUpdateAlert);
         registerActivityLifecycleCallbacks(activityCallbacks);
         wearableManager.start();
+        startKeepAliveService();
     }
 
     @Override
@@ -147,6 +152,7 @@ public class App extends Application {
             pendingAlerts.clear();
             alertShowing = false;
         }
+        stopKeepAliveService();
         if (wearableManager != null) {
             wearableManager.stop();
         }
@@ -159,6 +165,35 @@ public class App extends Application {
         if (cacheManager != null) {
             cacheManager.shutdown();
         }
+    }
+
+    private void startKeepAliveService() {
+        if (!NotificationHelper.canPost(this)) {
+            Logger.warn("Notification permission missing, keep-alive disabled");
+            return;
+        }
+        NotificationHelper.ensureChannels(this);
+        Intent intent = new Intent(this, KeepAliveService.class);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ContextCompat.startForegroundService(this, intent);
+            } else {
+                startService(intent);
+            }
+        } catch (Exception e) {
+            Logger.warn("Start keep-alive service failed: " + e.getMessage());
+        }
+    }
+
+    private void stopKeepAliveService() {
+        try {
+            stopService(new Intent(this, KeepAliveService.class));
+        } catch (Exception ignored) {
+        }
+    }
+
+    public void ensureKeepAliveService() {
+        startKeepAliveService();
     }
 
     public CacheManager getCacheManager() {

@@ -111,4 +111,12 @@
     <string name="action_search">搜索 (search)</string>
     <string name="action_lyric">歌词 (lyric)</string>
     <string name="action_pic">封面 (pic)</string>
+
+    <string name="notification_channel_status">后台服务</string>
+    <string name="notification_channel_status_desc">LiSync 后台常驻通知</string>
+    <string name="notification_channel_error">请求错误</string>
+    <string name="notification_channel_error_desc">请求异常提醒</string>
+    <string name="notification_status_title">LiSync 正在运行</string>
+    <string name="notification_status_text">后台常驻已启用，等待手表请求</string>
+    <string name="notification_error_title">请求失败</string>
 </resources>

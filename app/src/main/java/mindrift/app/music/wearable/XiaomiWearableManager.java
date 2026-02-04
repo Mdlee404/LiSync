@@ -41,6 +41,7 @@ import mindrift.app.music.core.proxy.RequestProxy;
 import mindrift.app.music.model.ResolveRequest;
 import mindrift.app.music.utils.Logger;
 import mindrift.app.music.utils.PlatformUtils;
+import mindrift.app.music.utils.NotificationHelper;
 
 public class XiaomiWearableManager {
     private static final String ACTION_CAPABILITIES = "capabilities";
@@ -403,6 +404,7 @@ public class XiaomiWearableManager {
                 request = gson.fromJson(payload, ResolveRequest.class);
             } catch (Exception e) {
                 sendMessage(nodeId, gson.toJson(new ErrorResponse("Invalid request", null, requestId)));
+                notifyRequestError("请求解析失败", "来自手表的请求格式不正确");
                 return;
             }
             requestProxy.resolve(request, new RequestProxy.ResolveCallback() {
@@ -414,6 +416,7 @@ public class XiaomiWearableManager {
                 @Override
                 public void onFailure(Exception e) {
                     sendMessage(nodeId, gson.toJson(new ErrorResponse(e.getMessage(), request, requestId)));
+                    notifyRequestError("请求失败", buildRequestErrorMessage(request, e));
                 }
             });
         });
@@ -463,11 +466,14 @@ public class XiaomiWearableManager {
         Logger.info("Search request: platform=" + platform + ", keyword=" + keyword + ", page=" + page + ", pageSize=" + pageSize);
         if (keyword == null || keyword.trim().isEmpty()) {
             sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_SEARCH, "Keyword missing", requestId)));
+            notifyRequestError("搜索请求失败", "关键词为空");
             return;
         }
         SearchService.SearchResult result = searchService.search(normalizedPlatform, keyword, page, pageSize);
         if (result == null) {
             sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_SEARCH, "Search failed", requestId)));
+            String platformName = PlatformUtils.displayName(normalizedPlatform);
+            notifyRequestError("搜索请求失败", "平台: " + (platformName == null || platformName.isEmpty() ? "未知" : platformName));
             return;
         }
         Map<String, Object> data = new HashMap<>();
@@ -476,8 +482,7 @@ public class XiaomiWearableManager {
         data.put("pageSize", result.pageSize);
         data.put("total", result.total);
         data.put("results", result.results);
-        String displayPlatform = PlatformUtils.displayName(normalizedPlatform);
-        sendMessage(nodeId, gson.toJson(buildSuccessPayload(ACTION_SEARCH, data, buildInfo("search", displayPlatform, keyword, result.page, result.pageSize), requestId)));
+        sendMessage(nodeId, gson.toJson(buildSuccessPayload(ACTION_SEARCH, data, buildInfo("search", normalizedPlatform, keyword, result.page, result.pageSize), requestId)));
     }
 
     private void handleLyric(String nodeId, JsonObject json, String requestId) {
@@ -490,10 +495,12 @@ public class XiaomiWearableManager {
         Logger.info("Lyric request: platform=" + platform + ", id=" + id);
         if (platform == null || platform.trim().isEmpty()) {
             sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_LYRIC, "Platform missing", requestId)));
+            notifyRequestError("歌词请求失败", "平台为空");
             return;
         }
         if (id == null || id.trim().isEmpty()) {
             sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_LYRIC, "SongId missing", requestId)));
+            notifyRequestError("歌词请求失败", "歌曲 ID 为空");
             return;
         }
         LyricService.LyricResult result = lyricService.getLyric(normalizedPlatform, id);
@@ -502,8 +509,7 @@ public class XiaomiWearableManager {
         data.put("tlyric", result.tlyric);
         data.put("rlyric", result.rlyric);
         data.put("lxlyric", result.lxlyric);
-        String displayPlatform = PlatformUtils.displayName(normalizedPlatform);
-        sendMessage(nodeId, gson.toJson(buildSuccessPayload(ACTION_LYRIC, data, buildInfo("lyric", displayPlatform, id, null, null), requestId)));
+        sendMessage(nodeId, gson.toJson(buildSuccessPayload(ACTION_LYRIC, data, buildInfo("lyric", normalizedPlatform, id, null, null), requestId)));
     }
 
     private void handleWatchReady(String nodeId, String requestId) {
@@ -551,7 +557,7 @@ public class XiaomiWearableManager {
     private Map<String, Object> buildInfo(String action, String platform, String keywordOrId, Integer page, Integer pageSize) {
         Map<String, Object> info = new HashMap<>();
         info.put("action", action);
-        if (platform != null) info.put("platform", PlatformUtils.displayName(platform));
+        if (platform != null) info.put("platform", platform);
         if (keywordOrId != null) {
             if ("search".equals(action)) info.put("keyword", keywordOrId);
             else info.put("songId", keywordOrId);
@@ -559,6 +565,31 @@ public class XiaomiWearableManager {
         if (page != null) info.put("page", page);
         if (pageSize != null) info.put("pageSize", pageSize);
         return info;
+    }
+
+    private String buildRequestErrorMessage(ResolveRequest request, Exception e) {
+        StringBuilder builder = new StringBuilder();
+        if (request != null) {
+            String platform = PlatformUtils.displayName(request.getSource());
+            String action = request.getAction();
+            String songId = request.resolveSongId();
+            if (platform != null && !platform.isEmpty()) {
+                builder.append("平台: ").append(platform).append('\n');
+            }
+            if (action != null && !action.isEmpty()) {
+                builder.append("动作: ").append(action).append('\n');
+            }
+            if (songId != null && !songId.isEmpty()) {
+                builder.append("ID: ").append(songId).append('\n');
+            }
+        }
+        String reason = e == null || e.getMessage() == null ? "未知错误" : e.getMessage();
+        builder.append("原因: ").append(reason);
+        return builder.toString().trim();
+    }
+
+    private void notifyRequestError(String title, String message) {
+        NotificationHelper.notifyError(context, title, message);
     }
 
     private void queryDeviceStatus(String nodeId) {
@@ -1094,7 +1125,7 @@ public class XiaomiWearableManager {
             this._requestId = requestId;
             Map<String, Object> info = new HashMap<>();
             if (request != null) {
-                info.put("platform", PlatformUtils.displayName(request.getSource()));
+                info.put("platform", PlatformUtils.normalize(request.getSource()));
                 info.put("action", request.getAction() == null ? "musicUrl" : request.getAction());
                 info.put("quality", request.getQuality());
                 info.put("songId", request.resolveSongId());

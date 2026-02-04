@@ -24,7 +24,6 @@ import mindrift.app.music.core.engine.LxNativeImpl;
 import mindrift.app.music.core.network.HttpClient;
 import mindrift.app.music.core.proxy.ScriptHandler;
 import mindrift.app.music.utils.Logger;
-import mindrift.app.music.utils.PlatformUtils;
 
 public class ScriptManager implements LxNativeImpl.ScriptEventListener {
     private final File scriptsDir;
@@ -165,15 +164,12 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
             if (!orderedSources.contains(key)) orderedSources.add(key);
         }
         Map<String, List<String>> qualityMap = new LinkedHashMap<>();
-        List<String> displaySources = new ArrayList<>();
         for (String source : orderedSources) {
             Set<String> list = qualities.get(source);
-            String display = PlatformUtils.displayName(source);
-            displaySources.add(display);
-            qualityMap.put(display, list == null ? new ArrayList<>() : new ArrayList<>(list));
+            qualityMap.put(source, list == null ? new ArrayList<>() : new ArrayList<>(list));
         }
         Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("platforms", displaySources);
+        summary.put("platforms", orderedSources);
         summary.put("qualities", qualityMap);
         summary.put("actions", Collections.singletonList("musicUrl"));
         return summary;

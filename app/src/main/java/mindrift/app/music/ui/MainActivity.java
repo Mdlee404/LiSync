@@ -9,6 +9,9 @@ import android.widget.AutoCompleteTextView;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.net.Uri;
+import android.Manifest;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
@@ -31,6 +34,7 @@ import mindrift.app.music.core.script.ScriptManager;
 import mindrift.app.music.wearable.XiaomiWearableManager;
 
 public class MainActivity extends AppCompatActivity {
+    private static final int REQ_NOTIFICATIONS = 1101;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private CacheManager cacheManager;
     private ScriptManager scriptManager;
@@ -54,6 +58,8 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        requestNotificationPermissionIfNeeded();
 
         App app = (App) getApplication();
         cacheManager = app.getCacheManager();
@@ -114,6 +120,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_NOTIFICATIONS) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                App app = (App) getApplication();
+                app.ensureKeepAliveService();
+            }
+        }
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
         mainHandler.removeCallbacks(deviceStatusRefresh);
@@ -123,6 +140,16 @@ public class MainActivity extends AppCompatActivity {
 
     private void refreshData() {
         refreshData(null);
+    }
+
+    private void requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return;
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            App app = (App) getApplication();
+            app.ensureKeepAliveService();
+            return;
+        }
+        requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFICATIONS);
     }
 
     private void refreshData(String preferredScriptId) {
