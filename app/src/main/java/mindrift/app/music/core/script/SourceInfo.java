@@ -4,9 +4,18 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class SourceInfo {
+    private String name;
     private String type;
     private List<String> actions = new ArrayList<>();
     private List<String> qualitys = new ArrayList<>();
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
 
     public String getType() {
         return type;

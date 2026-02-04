@@ -15,6 +15,8 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
     '__lx_native_call__utils_str2md5',
     '__lx_native_call__utils_aes_encrypt',
     '__lx_native_call__utils_rsa_encrypt',
+    '__lx_native_call__utils_zlib_inflate',
+    '__lx_native_call__utils_zlib_deflate',
   ]
   const nativeFuncs = {}
   for (const name of nativeFuncNames) {
@@ -430,24 +432,30 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
         }
       },
     },
-    // zlib: {
-    //   inflate(buf) {
-    //     return new Promise((resolve, reject) => {
-    //       zlib.inflate(buf, (err, data) => {
-    //         if (err) reject(new Error(err.message))
-    //         else resolve(data)
-    //       })
-    //     })
-    //   },
-    //   deflate(data) {
-    //     return new Promise((resolve, reject) => {
-    //       zlib.deflate(data, (err, buf) => {
-    //         if (err) reject(new Error(err.message))
-    //         else resolve(buf)
-    //       })
-    //     })
-    //   },
-    // }),
+    zlib: {
+      inflate(buf) {
+        return new Promise((resolve, reject) => {
+          try {
+            const payload = dataToB64(buf)
+            const result = nativeFuncs.utils_zlib_inflate(payload)
+            resolve(utils.buffer.from(result || '', 'base64'))
+          } catch (err) {
+            reject(err)
+          }
+        })
+      },
+      deflate(data) {
+        return new Promise((resolve, reject) => {
+          try {
+            const payload = dataToB64(data)
+            const result = nativeFuncs.utils_zlib_deflate(payload)
+            resolve(utils.buffer.from(result || '', 'base64'))
+          } catch (err) {
+            reject(err)
+          }
+        })
+      },
+    },
   }
 
   globalThis.lx = {

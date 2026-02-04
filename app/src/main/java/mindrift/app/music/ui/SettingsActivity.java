@@ -334,7 +334,7 @@ public class SettingsActivity extends AppCompatActivity {
             SourceInfo sourceInfo = entry.getValue();
             if (sourceInfo == null) continue;
             if (builder.length() > 0) builder.append('\n');
-            builder.append(formatPlatformLabel(source)).append(": ");
+            builder.append(formatPlatformLabel(source, sourceInfo)).append(": ");
             List<String> qualitys = sourceInfo.getQualitys();
             if (qualitys == null || qualitys.isEmpty()) {
                 builder.append(getString(R.string.script_capabilities_any_quality));
@@ -361,7 +361,7 @@ public class SettingsActivity extends AppCompatActivity {
                 if (sourceInfo.getType() != null && !"music".equalsIgnoreCase(sourceInfo.getType())) {
                     continue;
                 }
-                platformOptions.add(new PlatformItem(formatPlatformLabel(source), source));
+                platformOptions.add(new PlatformItem(formatPlatformLabel(source, sourceInfo), source));
             }
         }
         if (platformOptions.isEmpty()) {
@@ -401,6 +401,16 @@ public class SettingsActivity extends AppCompatActivity {
                 mapQualityLabels());
         qualityDropdown.setAdapter(qualityAdapter);
         qualityDropdown.setText(qualityOptions.get(0).label, false);
+    }
+
+    private String formatPlatformLabel(String source, SourceInfo sourceInfo) {
+        if (sourceInfo != null) {
+            String name = sourceInfo.getName();
+            if (name != null && !name.trim().isEmpty()) {
+                return name.trim();
+            }
+        }
+        return formatPlatformLabel(source);
     }
 
     private String formatPlatformLabel(String source) {

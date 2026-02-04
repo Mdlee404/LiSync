@@ -198,6 +198,14 @@ public class ScriptContext {
             String padding = args == null || args.length < 3 ? null : String.valueOf(args[2]);
             return nativeImpl.utilsRsaEncrypt(data, key, padding);
         });
+        context.getGlobalObject().setProperty("__lx_native_call__utils_zlib_inflate", args -> {
+            String data = args == null || args.length < 1 ? null : String.valueOf(args[0]);
+            return nativeImpl.zlibInflate(data);
+        });
+        context.getGlobalObject().setProperty("__lx_native_call__utils_zlib_deflate", args -> {
+            String data = args == null || args.length < 1 ? null : String.valueOf(args[0]);
+            return nativeImpl.zlibDeflate(data);
+        });
         context.getGlobalObject().setProperty("__lx_native_call__set_timeout", args -> {
             if (args == null || args.length < 2) return null;
             double id = args[0] instanceof Number ? ((Number) args[0]).doubleValue() : Double.parseDouble(String.valueOf(args[0]));
