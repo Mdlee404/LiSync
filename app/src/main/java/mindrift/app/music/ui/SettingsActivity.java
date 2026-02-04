@@ -32,6 +32,7 @@ import mindrift.app.music.core.script.ScriptInfo;
 import mindrift.app.music.core.script.SourceInfo;
 import mindrift.app.music.model.ResolveRequest;
 import mindrift.app.music.utils.AppLogBuffer;
+import mindrift.app.music.utils.PlatformUtils;
 
 public class SettingsActivity extends AppCompatActivity {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -413,7 +414,7 @@ public class SettingsActivity extends AppCompatActivity {
         if (sourceInfo != null) {
             String name = sourceInfo.getName();
             if (name != null && !name.trim().isEmpty()) {
-                return name.trim();
+                return PlatformUtils.displayName(name.trim());
             }
         }
         return formatPlatformLabel(source);

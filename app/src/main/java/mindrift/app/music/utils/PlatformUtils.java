@@ -42,6 +42,15 @@ public final class PlatformUtils {
         if ("kg".equalsIgnoreCase(code)) {
             return "酷狗音乐";
         }
+        if ("kw".equalsIgnoreCase(code)) {
+            return "酷我 (KW)";
+        }
+        if ("mg".equalsIgnoreCase(code)) {
+            return "咪咕 (MG)";
+        }
+        if ("local".equalsIgnoreCase(code)) {
+            return "本地";
+        }
         return platform;
     }
 }
