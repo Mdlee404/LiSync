@@ -1,6 +1,8 @@
 package mindrift.app.music.core.proxy;
 
+import android.content.Context;
 import com.google.gson.Gson;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -12,6 +14,7 @@ import mindrift.app.music.core.script.ScriptManager;
 import mindrift.app.music.model.ResolveRequest;
 import mindrift.app.music.utils.Logger;
 import mindrift.app.music.utils.PlatformUtils;
+import mindrift.app.music.utils.SettingsStore;
 
 public class RequestProxy {
     public interface ResolveCallback {
@@ -21,11 +24,13 @@ public class RequestProxy {
 
     private final ScriptManager scriptManager;
     private final CacheManager cacheManager;
+    private final Context appContext;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Gson gson = new Gson();
     private static final long REQUEST_TIMEOUT_MS = 4000;
 
-    public RequestProxy(ScriptManager scriptManager, CacheManager cacheManager) {
+    public RequestProxy(Context context, ScriptManager scriptManager, CacheManager cacheManager) {
+        this.appContext = context == null ? null : context.getApplicationContext();
         this.scriptManager = scriptManager;
         this.cacheManager = cacheManager;
     }
@@ -74,8 +79,15 @@ public class RequestProxy {
             Logger.info("Cache skipped (nocache=true)");
         }
 
-        if (request.getTargetScriptId() != null && !request.getTargetScriptId().isEmpty()) {
-            ScriptHandler handler = scriptManager.getHandlerById(source, request.getTargetScriptId(), action);
+        String forcedScriptId = SettingsStore.getForcedScriptId(appContext);
+        boolean forcePolling = SettingsStore.isForcePolling(appContext);
+        String targetScriptId = request.getTargetScriptId();
+        if (forcedScriptId != null && !forcedScriptId.trim().isEmpty()) {
+            targetScriptId = forcedScriptId.trim();
+        }
+
+        if (targetScriptId != null && !targetScriptId.isEmpty() && !forcePolling) {
+            ScriptHandler handler = scriptManager.getHandlerById(source, targetScriptId, action);
             if (handler == null) {
                 throw new Exception("No provider found for source: " + source);
             }
@@ -85,6 +97,9 @@ public class RequestProxy {
         List<ScriptHandler> handlers = scriptManager.getOrderedHandlers(source, action);
         if (handlers.isEmpty()) {
             throw new Exception("No provider found for source: " + source);
+        }
+        if (targetScriptId != null && !targetScriptId.isEmpty()) {
+            handlers = prioritizeHandlers(handlers, targetScriptId);
         }
 
         Exception lastError = null;
@@ -98,6 +113,26 @@ public class RequestProxy {
         }
 
         throw new Exception(lastError == null ? "All providers failed" : lastError.getMessage());
+    }
+
+    private List<ScriptHandler> prioritizeHandlers(List<ScriptHandler> handlers, String targetScriptId) {
+        if (handlers == null || handlers.isEmpty() || targetScriptId == null || targetScriptId.isEmpty()) {
+            return handlers;
+        }
+        List<ScriptHandler> reordered = new ArrayList<>(handlers.size());
+        ScriptHandler target = null;
+        for (ScriptHandler handler : handlers) {
+            if (handler == null) continue;
+            if (targetScriptId.equals(handler.getScriptId())) {
+                target = handler;
+            } else {
+                reordered.add(handler);
+            }
+        }
+        if (target != null) {
+            reordered.add(0, target);
+        }
+        return reordered;
     }
 
     private String buildResponse(ResolveRequest request, String action, String quality, String songId, Object data, String provider) {

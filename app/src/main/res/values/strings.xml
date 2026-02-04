@@ -20,6 +20,11 @@
     <string name="action_reload_scripts">重载音源配置</string>
 
     <string name="section_debug">调试</string>
+    <string name="section_resolve">解析策略</string>
+    <string name="hint_forced_script">强制音源脚本</string>
+    <string name="force_script_none">不强制（跟随请求）</string>
+    <string name="force_polling_title">强制轮询</string>
+    <string name="force_polling_desc">关闭时使用旧逻辑；开启后优先指定脚本，失败继续轮询其他脚本。</string>
     <string name="hint_script">目标脚本</string>
     <string name="hint_platform">平台</string>
     <string name="hint_action">动作</string>

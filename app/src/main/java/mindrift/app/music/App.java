@@ -40,7 +40,7 @@ public class App extends Application {
         Logger.init();
         cacheManager = new CacheManager(this);
         scriptManager = new ScriptManager(this);
-        requestProxy = new RequestProxy(scriptManager, cacheManager);
+        requestProxy = new RequestProxy(this, scriptManager, cacheManager);
         wearableManager = new XiaomiWearableManager(this, requestProxy, scriptManager);
         scriptManager.addChangeListener(() -> wearableManager.notifyCapabilitiesChanged());
         scriptManager.addUpdateAlertListener(this::handleUpdateAlert);
