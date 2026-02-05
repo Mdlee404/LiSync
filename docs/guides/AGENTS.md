@@ -271,7 +271,7 @@ gradlew.bat connectedAndroidTest
 ### UI
 
 * **AgreementActivity**：启动协议页，未同意则不进入主界面。
-* **MainActivity**：脚本管理 + 设备状态/刷新 + 上传音乐。
+* **MainActivity**：脚本管理 + 设备状态/刷新 + 上传音乐 + 主题传输入口 + 搜索播放测试入口。
 * **SettingsActivity**：缓存/日志查看与复制、脚本能力展示、请求测试（musicUrl/search/lyric）。
 * **SearchPlayActivity**：内置搜索与播放测试。
 * **ThemeTransferActivity**：选择 `theme.zip` 解压并传输主题。

@@ -5,6 +5,7 @@ import android.net.Uri;
 import android.os.SystemClock;
 import androidx.documentfile.provider.DocumentFile;
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
@@ -58,6 +59,8 @@ public class XiaomiWearableManager {
     private static final String ACTION_SEARCH = "search";
     private static final String ACTION_LYRIC = "lyric";
     private static final String ACTION_GET_LYRIC = "getLyric";
+    private static final String ACTION_LOG_UPLOAD = "log.upload";
+    private static final String ACTION_LOG_UPLOAD_RESULT = "log.upload.result";
     private static final String ACTION_UPLOAD_START = "upload.start";
     private static final String ACTION_UPLOAD_CHUNK = "upload.chunk";
     private static final String ACTION_UPLOAD_FINISH = "upload.finish";
@@ -74,7 +77,10 @@ public class XiaomiWearableManager {
     private static final int UPLOAD_CHUNK_SIZE = 8 * 1024;
     private static final long UPLOAD_TIMEOUT_MS = 30000L;
     private static final int THEME_CHUNK_SIZE = 8 * 1024;
-    private static final long THEME_TIMEOUT_MS = 30000L;
+    private static final long THEME_TIMEOUT_MS = 2000L;
+    private static final long THEME_FINISH_DELAY_MS = 100L;
+    private static final int THEME_FINISH_RETRY_COUNT = 1;
+    private static final long THEME_FINISH_RETRY_DELAY_MS = 200L;
     private static final Pattern THEME_ID_PATTERN = Pattern.compile("^[a-z0-9_-]{1,32}$");
     private static final Permission[] REQUIRED_PERMISSIONS = new Permission[]{
             Permission.DEVICE_MANAGER,
@@ -407,6 +413,10 @@ public class XiaomiWearableManager {
                 handleWatchReady(nodeId, requestId);
                 return;
             }
+            if (ACTION_LOG_UPLOAD.equalsIgnoreCase(action)) {
+                handleLogUpload(nodeId, json, requestId);
+                return;
+            }
             if (isUploadAction(action)) {
                 handleUploadResponse(action, json, requestId);
                 return;
@@ -448,9 +458,8 @@ public class XiaomiWearableManager {
 
     private void sendMessage(String nodeId, String json) {
         byte[] data = json.getBytes(StandardCharsets.UTF_8);
-        Logger.info("Send message to node " + nodeId + ", bytes=" + data.length);
+        logOutgoingMessage(nodeId, json, data.length);
         messageApi.sendMessage(nodeId, data)
-                .addOnSuccessListener(result -> Logger.info("Response sent to node " + nodeId))
                 .addOnFailureListener(e -> Logger.error("Send message failed: " + e.getMessage(), e));
     }
 
@@ -534,6 +543,52 @@ public class XiaomiWearableManager {
         data.put("rlyric", result.rlyric);
         data.put("lxlyric", result.lxlyric);
         sendMessage(nodeId, gson.toJson(buildSuccessPayload(ACTION_LYRIC, data, buildInfo("lyric", normalizedPlatform, id, null, null), requestId)));
+    }
+
+    private void handleLogUpload(String nodeId, JsonObject json, String requestId) {
+        if (json == null) return;
+        JsonObject data = json.getAsJsonObject("data");
+        if (data == null) {
+            sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_LOG_UPLOAD_RESULT, "missing data", requestId)));
+            return;
+        }
+        int schema = getInt(data, "schema", -1);
+        String appId = getString(data, "app");
+        String reason = getString(data, "reason");
+        long sentAt = getLong(data, "sentAt", -1L);
+        int count = getInt(data, "count", -1);
+        Logger.info("Log upload: schema=" + schema + " app=" + appId + " sentAt=" + sentAt + " reason=" + reason + " count=" + count);
+
+        JsonArray items = data.getAsJsonArray("items");
+        if (items == null) {
+            Logger.warn("Log upload items missing");
+            sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_LOG_UPLOAD_RESULT, "missing items", requestId)));
+            return;
+        }
+        if (count >= 0 && items.size() != count) {
+            Logger.warn("Log upload count mismatch: declared=" + count + " actual=" + items.size());
+        }
+        for (JsonElement element : items) {
+            if (element == null || !element.isJsonObject()) continue;
+            JsonObject item = element.getAsJsonObject();
+            long ts = getLong(item, "ts", -1L);
+            String type = getString(item, "type");
+            String message = getString(item, "message");
+            String detail = "";
+            JsonElement detailElement = item.get("data");
+            if (detailElement != null && !detailElement.isJsonNull()) {
+                detail = detailElement.toString();
+            }
+            String line = "VelaLog type=" + type + " ts=" + ts + " message=" + message + (detail.isEmpty() ? "" : " data=" + detail);
+            if ("error".equalsIgnoreCase(type)) {
+                Logger.error(line);
+            } else if ("warn".equalsIgnoreCase(type)) {
+                Logger.warn(line);
+            } else {
+                Logger.info(line);
+            }
+        }
+        sendMessage(nodeId, gson.toJson(buildSuccessPayload(ACTION_LOG_UPLOAD_RESULT, null, null, requestId)));
     }
 
     private void handleWatchReady(String nodeId, String requestId) {
@@ -889,6 +944,18 @@ public class XiaomiWearableManager {
         }
     }
 
+
+    private long getLong(JsonObject obj, String key, long fallback) {
+        if (obj == null || key == null || !obj.has(key)) return fallback;
+        try {
+            JsonElement el = obj.get(key);
+            if (el == null || el.isJsonNull()) return fallback;
+            return el.getAsLong();
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
     private boolean getBoolean(JsonObject obj, String key) {
         if (obj == null || key == null || !obj.has(key)) return false;
         try {
@@ -906,6 +973,149 @@ public class XiaomiWearableManager {
             return el.getAsBoolean();
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    private void logOutgoingMessage(String nodeId, String json, int bytes) {
+        if (json == null || json.isEmpty()) {
+            Logger.info("Send message to node " + nodeId + ", bytes=" + bytes);
+            return;
+        }
+        if (json.contains("\"action\":\"theme.file.chunk\"") && json.contains("\"path\":\"theme.json\"")) {
+            Logger.info("Theme send file.chunk: path=theme.json bytes=" + bytes);
+            return;
+        }
+        if (json.contains("\"action\":\"theme.file.chunk\"")) {
+            return;
+        }
+        try {
+            JsonObject obj = gson.fromJson(json, JsonObject.class);
+            String action = getString(obj, "action");
+            String requestId = getString(obj, "_requestId");
+            if (action == null || action.isEmpty()) {
+                Logger.info("Send message to node " + nodeId + ", bytes=" + bytes);
+                return;
+            }
+            if (action.startsWith("theme.")) {
+                String themeId = getString(obj, "themeId");
+                String fileId = getString(obj, "fileId");
+                String path = getString(obj, "path");
+                switch (action) {
+                    case ACTION_THEME_OPEN:
+                        Logger.info("Theme send open: requestId=" + requestId + " themeId=" + themeId);
+                        return;
+                    case ACTION_THEME_INIT:
+                        int totalFiles = getInt(obj, "totalFiles", -1);
+                        int totalChunks = getInt(obj, "totalChunks", -1);
+                        long totalBytes = getLong(obj, "totalBytes", -1L);
+                        boolean clean = getBoolean(obj, "clean");
+                        Logger.info("Theme send init: requestId=" + requestId + " themeId=" + themeId
+                                + " totalFiles=" + totalFiles + " totalChunks=" + totalChunks
+                                + " totalBytes=" + totalBytes + " clean=" + clean);
+                        return;
+                    case ACTION_THEME_FILE_START:
+                        long size = getLong(obj, "size", -1L);
+                        int chunks = getInt(obj, "totalChunks", -1);
+                        Logger.info("Theme send file.start: requestId=" + requestId + " fileId=" + fileId
+                                + " path=" + path + " size=" + size + " totalChunks=" + chunks);
+                        return;
+                    case ACTION_THEME_FILE_FINISH:
+                        Logger.info("Theme send file.finish: requestId=" + requestId + " fileId=" + fileId + " path=" + path);
+                        return;
+                    case ACTION_THEME_FINISH:
+                        Logger.info("Theme send finish: requestId=" + requestId + " themeId=" + themeId);
+                        return;
+                    case ACTION_THEME_CANCEL:
+                        Logger.info("Theme send cancel: requestId=" + requestId + " clean=" + getBoolean(obj, "clean"));
+                        return;
+                    default:
+                        Logger.info("Theme send: action=" + action + " requestId=" + requestId + " themeId=" + themeId
+                                + " fileId=" + fileId + " path=" + path);
+                        return;
+                }
+            }
+            Logger.info("Send message: action=" + action + " requestId=" + requestId + " bytes=" + bytes);
+        } catch (Exception e) {
+            Logger.info("Send message to node " + nodeId + ", bytes=" + bytes);
+        }
+    }
+
+    private byte[] normalizeThemeJsonBytes(byte[] data) {
+        if (data == null || data.length == 0) return data;
+        int offset = 0;
+        if (data.length >= 3 && (data[0] & 0xFF) == 0xEF && (data[1] & 0xFF) == 0xBB && (data[2] & 0xFF) == 0xBF) {
+            offset = 3;
+        }
+        if (offset > 0) {
+            Logger.warn("Theme json BOM detected, stripping");
+        }
+        int end = data.length;
+        if (end > offset && data[end - 1] == 0) {
+            while (end > offset && data[end - 1] == 0) {
+                end--;
+            }
+            Logger.warn("Theme json trailing null bytes detected, stripping");
+        }
+        if (offset == 0 && end == data.length) {
+            return data;
+        }
+        return Arrays.copyOfRange(data, offset, end);
+    }
+
+    private void logThemeJsonDiagnostics(byte[] data) {
+        if (data == null || data.length == 0) {
+            Logger.warn("Theme json empty");
+            return;
+        }
+        int length = data.length;
+        String head = bytesToHex(data, 0, Math.min(16, length));
+        String tail = length > 16 ? bytesToHex(data, Math.max(0, length - 16), Math.min(16, length)) : head;
+        Logger.info("Theme json bytes: size=" + length + " head=" + head + " tail=" + tail);
+        Logger.info("Theme json sha256: " + sha256Hex(data));
+        try {
+            String content = new String(data, StandardCharsets.UTF_8);
+            gson.fromJson(content, JsonObject.class);
+            Logger.info("Theme json parse: ok");
+        } catch (Exception e) {
+            Logger.warn("Theme json parse failed: " + e.getMessage());
+        }
+    }
+
+    private byte[] canonicalizeThemeJsonBytes(byte[] data) {
+        if (data == null || data.length == 0) return data;
+        try {
+            String content = new String(data, StandardCharsets.UTF_8);
+            JsonObject obj = gson.fromJson(content, JsonObject.class);
+            if (obj == null) return data;
+            String canonical = gson.toJson(obj);
+            byte[] bytes = canonical.getBytes(StandardCharsets.UTF_8);
+            Logger.info("Theme json canonicalized: size=" + bytes.length);
+            return bytes;
+        } catch (Exception e) {
+            Logger.warn("Theme json canonicalize failed: " + e.getMessage());
+            return data;
+        }
+    }
+
+    private String bytesToHex(byte[] data, int start, int length) {
+        if (data == null || length <= 0) return "";
+        int end = Math.min(data.length, start + length);
+        StringBuilder builder = new StringBuilder((end - start) * 2);
+        for (int i = start; i < end; i++) {
+            int v = data[i] & 0xFF;
+            if (v < 16) builder.append('0');
+            builder.append(Integer.toHexString(v));
+        }
+        return builder.toString();
+    }
+
+    private String sha256Hex(byte[] data) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(data);
+            return bytesToHex(hash, 0, hash.length);
+        } catch (Exception e) {
+            return "error:" + e.getMessage();
         }
     }
 
@@ -1125,7 +1335,11 @@ public class XiaomiWearableManager {
     }
 
     private void handleThemeResponse(String action, JsonObject json, String requestId) {
-        if (json == null || requestId == null || requestId.isEmpty()) return;
+        if (json == null) return;
+        if (requestId == null || requestId.isEmpty()) {
+            Logger.warn("Theme response missing requestId: action=" + action);
+            return;
+        }
         ThemeTransferSession session = themeRequestMap.remove(requestId);
         if (session == null) return;
         boolean ok = getBoolean(json, "ok");
@@ -1133,7 +1347,8 @@ public class XiaomiWearableManager {
         String path = getString(json, "path");
         String fileId = getString(json, "fileId");
         String themeId = getString(json, "themeId");
-        Logger.info("Theme response: action=" + action + " ok=" + ok + " themeId=" + themeId + " fileId=" + fileId + " path=" + path);
+        Logger.info("Theme response: action=" + action + " requestId=" + requestId + " ok=" + ok
+                + " themeId=" + themeId + " fileId=" + fileId + " path=" + path + " message=" + message);
         ThemeResult result = new ThemeResult(ok, message, action);
         session.setResult(requestId, result);
         if (!ok) {
@@ -1273,7 +1488,22 @@ public class XiaomiWearableManager {
                     String startId = buildThemeRequestId("theme_file_start");
                     registerThemeRequest(session, startId);
                     sendMessage(nodeId, gson.toJson(buildThemeFileStartPayload(startId, fileId, themeId, file.path, file.size, file.totalChunks)));
+                    ThemeResult startResult = awaitThemeResult(session, startId, THEME_TIMEOUT_MS);
+                    if (startResult == null) {
+                        notifyThemeFailure(session, "主题文件开始确认超时: " + file.path);
+                        break;
+                    }
+                    if (!startResult.ok) {
+                        String msg = startResult.message == null || startResult.message.trim().isEmpty()
+                                ? "主题文件开始失败: " + file.path
+                                : startResult.message.trim();
+                        notifyThemeFailure(session, msg);
+                        break;
+                    }
 
+                    if (shouldAbortTheme(session)) {
+                        break;
+                    }
                     if (file.cached != null) {
                         sentBytes = sendThemeChunksFromMemory(nodeId, session, file, themeId, fileId, sentBytes, useBytes,
                                 info.totalBytes, filesSent, totalFiles, lastPercent);
@@ -1282,9 +1512,24 @@ public class XiaomiWearableManager {
                                 info.totalBytes, filesSent, totalFiles, lastPercent);
                     }
 
+                    if (shouldAbortTheme(session)) {
+                        break;
+                    }
                     String finishId = buildThemeRequestId("theme_file_finish");
                     registerThemeRequest(session, finishId);
                     sendMessage(nodeId, gson.toJson(buildThemeFileFinishPayload(finishId, fileId, themeId, file.path)));
+                    ThemeResult finishResult = awaitThemeResult(session, finishId, THEME_TIMEOUT_MS);
+                    if (finishResult == null) {
+                        notifyThemeFailure(session, "主题文件完成确认超时: " + file.path);
+                        break;
+                    }
+                    if (!finishResult.ok) {
+                        String msg = finishResult.message == null || finishResult.message.trim().isEmpty()
+                                ? "主题文件完成失败: " + file.path
+                                : finishResult.message.trim();
+                        notifyThemeFailure(session, msg);
+                        break;
+                    }
                     filesSent++;
                     if (!useBytes) {
                         reportThemeProgress(session, filesSent, totalFiles, 0, 0, lastPercent);
@@ -1296,10 +1541,28 @@ public class XiaomiWearableManager {
                     return;
                 }
 
-                String finishId = buildThemeRequestId("theme_finish");
-                registerThemeRequest(session, finishId);
-                sendMessage(nodeId, gson.toJson(buildThemeFinishPayload(finishId, themeId)));
-                ThemeResult finishResult = awaitThemeResult(session, finishId, THEME_TIMEOUT_MS);
+                if (THEME_FINISH_DELAY_MS > 0) {
+                    SystemClock.sleep(THEME_FINISH_DELAY_MS);
+                }
+                ThemeResult finishResult = null;
+                int finishAttempt = 0;
+                while (finishAttempt <= THEME_FINISH_RETRY_COUNT) {
+                    if (finishAttempt > 0) {
+                        Logger.warn("Theme finish retry: attempt=" + (finishAttempt + 1)
+                                + "/" + (THEME_FINISH_RETRY_COUNT + 1));
+                    }
+                    String finishId = buildThemeRequestId("theme_finish");
+                    registerThemeRequest(session, finishId);
+                    sendMessage(nodeId, gson.toJson(buildThemeFinishPayload(finishId, themeId)));
+                    finishResult = awaitThemeResult(session, finishId, THEME_TIMEOUT_MS);
+                    if (finishResult != null) {
+                        break;
+                    }
+                    finishAttempt++;
+                    if (finishAttempt <= THEME_FINISH_RETRY_COUNT && THEME_FINISH_RETRY_DELAY_MS > 0) {
+                        SystemClock.sleep(THEME_FINISH_RETRY_DELAY_MS);
+                    }
+                }
                 if (finishResult == null) {
                     notifyThemeFailure(session, "主题传输完成确认超时");
                     return;
@@ -1492,6 +1755,24 @@ public class XiaomiWearableManager {
         if (data == null) {
             throw new ThemeTransferException("读取主题文件失败: " + file.path);
         }
+        if ("theme.json".equalsIgnoreCase(file.path)) {
+            byte[] normalized = normalizeThemeJsonBytes(data);
+            if (normalized != data) {
+                data = normalized;
+                file.cached = normalized;
+                file.size = normalized.length;
+                file.totalChunks = Math.max(1, (int) ((normalized.length + (THEME_CHUNK_SIZE - 1)) / THEME_CHUNK_SIZE));
+            }
+            byte[] canonical = canonicalizeThemeJsonBytes(data);
+            if (canonical != data) {
+                data = canonical;
+                file.cached = canonical;
+                file.size = canonical.length;
+                file.totalChunks = Math.max(1, (int) ((canonical.length + (THEME_CHUNK_SIZE - 1)) / THEME_CHUNK_SIZE));
+            }
+            logThemeJsonDiagnostics(data);
+            Logger.info("Theme file content ready: path=" + file.path + " bytes=" + data.length);
+        }
         int total = Math.max(1, (int) ((data.length + (THEME_CHUNK_SIZE - 1)) / THEME_CHUNK_SIZE));
         for (int index = 0; index < total; index++) {
             if (shouldAbortTheme(session)) {
@@ -1500,6 +1781,9 @@ public class XiaomiWearableManager {
             int start = index * THEME_CHUNK_SIZE;
             int end = Math.min(start + THEME_CHUNK_SIZE, data.length);
             byte[] chunk = Arrays.copyOfRange(data, start, end);
+            if ("theme.json".equalsIgnoreCase(file.path) && (index == 0 || index == total - 1)) {
+                Logger.info("Theme chunk sending: path=" + file.path + " index=" + (index + 1) + "/" + total + " bytes=" + chunk.length);
+            }
             String base64 = android.util.Base64.encodeToString(chunk, android.util.Base64.NO_WRAP);
             sendMessage(nodeId, gson.toJson(buildThemeFileChunkPayload(fileId, themeId, file.path, index + 1, total, base64)));
             sentBytes += chunk.length;
@@ -1528,6 +1812,9 @@ public class XiaomiWearableManager {
                 }
                 index++;
                 byte[] chunk = read == buffer.length ? buffer : Arrays.copyOf(buffer, read);
+                if ("theme.json".equalsIgnoreCase(file.path) && (index == 1 || index == total)) {
+                    Logger.info("Theme chunk sending: path=" + file.path + " index=" + index + "/" + total + " bytes=" + read);
+                }
                 String base64 = android.util.Base64.encodeToString(chunk, android.util.Base64.NO_WRAP);
                 sendMessage(nodeId, gson.toJson(buildThemeFileChunkPayload(fileId, themeId, file.path, index, total, base64)));
                 sentBytes += read;
@@ -1538,6 +1825,9 @@ public class XiaomiWearableManager {
             }
             if (index == 0) {
                 String base64 = android.util.Base64.encodeToString(new byte[0], android.util.Base64.NO_WRAP);
+                if ("theme.json".equalsIgnoreCase(file.path)) {
+                    Logger.info("Theme chunk sending: path=" + file.path + " index=1/1 bytes=0");
+                }
                 sendMessage(nodeId, gson.toJson(buildThemeFileChunkPayload(fileId, themeId, file.path, 1, 1, base64)));
             }
             return sentBytes;
@@ -1931,6 +2221,21 @@ public class XiaomiWearableManager {
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -89,6 +89,8 @@ public class MainActivity extends AppCompatActivity {
         MaterialButton importFileButton = findViewById(R.id.button_import_file);
         MaterialButton importUrlButton = findViewById(R.id.button_import_url);
         MaterialButton uploadMusicButton = findViewById(R.id.button_upload_music);
+        MaterialButton openSearchPlayButton = findViewById(R.id.button_open_search_play_home);
+        MaterialButton openThemeTransferButton = findViewById(R.id.button_open_theme_transfer_home);
         MaterialButton reloadScriptsButton = findViewById(R.id.button_reload_scripts);
         MaterialButton editScriptButton = findViewById(R.id.button_script_edit_home);
         MaterialButton renameScriptButton = findViewById(R.id.button_script_rename_home);
@@ -118,6 +120,8 @@ public class MainActivity extends AppCompatActivity {
         uploadLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), this::handleUploadFile);
         uploadMusicButton.setOnClickListener(v -> uploadLauncher.launch(new String[] {"audio/*"}));
         importUrlButton.setOnClickListener(v -> showImportUrlDialog());
+        openSearchPlayButton.setOnClickListener(v -> startActivity(new Intent(this, SearchPlayActivity.class)));
+        openThemeTransferButton.setOnClickListener(v -> startActivity(new Intent(this, ThemeTransferActivity.class)));
         editScriptButton.setOnClickListener(v -> showEditScriptDialog());
         renameScriptButton.setOnClickListener(v -> showRenameScriptDialog());
         deleteScriptButton.setOnClickListener(v -> confirmDeleteScript());
