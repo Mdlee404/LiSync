@@ -15,6 +15,19 @@
     <string name="action_clear_cache">清理</string>
 
     <string name="section_console">音源管理</string>
+    <string name="section_shortcuts">快捷入口</string>
+    <string name="section_tools">工具</string>
+    <string name="section_manage">管理</string>
+    <string name="action_open_script_center">脚本管理</string>
+    <string name="action_open_cache">缓存管理</string>
+    <string name="action_open_logs">日志中心</string>
+    <string name="action_open_diagnostics">诊断中心</string>
+    <string name="action_open_tools">工具与设置</string>
+    <string name="tools_title">工具与设置</string>
+    <string name="script_center_title">脚本管理</string>
+    <string name="cache_title">缓存管理</string>
+    <string name="logs_title">日志中心</string>
+    <string name="diagnostics_title">诊断中心</string>
     <string name="action_import_file">从文件导入</string>
     <string name="action_import_url">从链接导入</string>
     <string name="action_reload_scripts">重载音源配置</string>
@@ -95,6 +108,8 @@
     <string name="dialog_device_message">未检测到已连接的设备，请确认设备已连接。</string>
     <string name="dialog_retry">重试</string>
     <string name="dialog_ignore">知道了</string>
+    <string name="dialog_common_title">提示</string>
+    <string name="action_confirm">确定</string>
 
     <string name="request_in_progress">请求处理中...</string>
     <string name="request_failed">请求失败: %1$s</string>
@@ -171,6 +186,7 @@
     <string name="theme_transfer_status_finished">传输完成</string>
     <string name="theme_transfer_status_failed">传输失败: %1$s</string>
     <string name="theme_transfer_status_cancelled">传输已取消</string>
+    <string name="theme_transfer_restart_prompt">请重启生效</string>
     <string name="theme_transfer_zip_missing">未选择主题压缩包</string>
     <string name="theme_transfer_extract_failed">解压失败: %1$s</string>
     <string name="theme_transfer_progress_format">进度: %1$d%% (%2$d/%3$d)</string>

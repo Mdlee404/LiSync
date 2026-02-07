@@ -40,6 +40,26 @@
             android:exported="false" />
 
         <activity
+            android:name=".ui.ScriptCenterActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.CacheActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.LogsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.DiagnosticsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.ToolsActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".ui.ThemeTransferActivity"
             android:exported="false" />
 

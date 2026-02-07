@@ -3,6 +3,81 @@
 > 项目适配说明（2026-02-04）
 > - 本文件为历史审查记录，未必反映当前代码状态。
 > - 本轮已完成代码与文档对齐，新增主题传输与文档归档，详见 `docs/README.md`。
+
+## 0\. 2026-02-06 复查增补（代码现状）
+
+- 版本号已同步为 `1.5-换芯`（`versionCode: 2`），见 `src/manifest.json`。
+- 新增主题传输中转页 `pages/theme_download`，与 `src/common/lisync.js`、`src/common/theme_transfer.js` 协作完成主题下发/落盘/应用。
+- 主题传输链路对大文件采用更快的响应路径（`theme.file.finish` 立即回执，避免发送端超时取消）。
+- 背景图样式统一使用 `background-image: <uri>`（不使用 `url(...)` 包裹），`background-repeat` 未启用；页面内容滚动通过 `scroll` 容器承载，背景层绝对定位保持不滚动。
+
+### 0.1 运行态总览（基于当前代码）
+
+- 入口页：`/pages/init`；设计宽度 480；设备类型 `watch`（见 `src/manifest.json`）。
+- 互联通道：使用 `@system.interconnect` 与手机端 LiSync 连接，完成搜索/歌词/播放地址获取与主题传输。
+- 主题：内置 light/dark + 自定义主题包（本地/手机端传输）；主题快照常驻 `theme_snapshot`。
+- 订阅：设备端进行 license 校验（HMAC-SHA256 + Device ID 绑定），订阅页提供二维码与激活。
+
+### 0.2 关键数据流（精简）
+
+1. **启动**：`init.ux` 读取协议状态 → 跳转 `agreement/home`，并在连接后发送 `WATCH_READY`。
+2. **播放**：`app.ux` 维护播放队列与模式；页面触发 `playMusic` → `@system.audio`。
+3. **搜索/解析**：`api.js` 通过 `lisync.search/getMusicUrl/getLyric` 请求手机端。
+4. **主题传输**：手机端 `theme.*` 消息 → `lisync.js` → `theme_transfer.js` 写盘 → `app.ux` 应用主题。
+
+### 0.3 近期变更点（与旧审查差异）
+
+- **主题传输**：新增中转页与文件落盘流程，支持大文件分片写入与立即回执。
+- **背景图**：统一 `background-image: <uri>`，背景层绝对定位，内容层按需滚动。
+- **日志**：LiSync 内置日志历史与上传（`log.upload`）。
+
+### 0.4 全量文件审查清单（代码文件）
+
+| 文件 | 作用 | 关键点 |
+| --- | --- | --- |
+| `src/manifest.json` | 应用清单 | 版本 `1.5-换芯`，入口 `pages/init`，声明 interconnect/audio/request 等能力 |
+| `src/app.ux` | 全局状态与播放核心 | 主题快照/验证、License 校验、Lisync 初始化、播放队列/模式/重试 |
+| `src/common/api.js` | 搜索/解析 API 封装 | 默认走 Lisync；直连模式开关 `WATCH_DIRECT_ENABLED` 关闭 |
+| `src/common/auth_headers.js` | License Header | 统一返回 `X-License` |
+| `src/common/base64.js` | Base64 编解码 | 同时提供 `base64ToArrayBuffer` |
+| `src/common/config.js` | 配置 | 仍包含 `0.3 Alpha` 版本字段（与 manifest 不同） |
+| `src/common/db.js` | 本地 DB | JSON 文件 + 操作队列，保存协议/本地歌曲/收藏/License |
+| `src/common/download.js` | 下载管理 | 并行下载音频+歌词，支持取消与落盘 |
+| `src/common/kv_storage.js` | KV 存储 | 主题相关键独立文件存储；带刷新日志 |
+| `src/common/license.js` | 订阅校验 | HMAC-SHA256、Device ID 绑定、过期校验、结果缓存 |
+| `src/common/lisync.js` | 互联通道 | interconnect 收发、搜索/歌词/URL 请求、主题传输、日志上传 |
+| `src/common/lrc-parser.js` | 歌词解析 | 兼容多时间标签、offset、返回对象与数组转换 |
+| `src/common/lyric.js` | 歌词读取 | 本地优先 + KV 缓存 + 远程拉取 |
+| `src/common/screen-util.js` | 屏幕适配 | 圆/方/胶囊屏判定与缩放工具 |
+| `src/common/sha256.js` | Hash | 纯 JS SHA256，用于主题校验 |
+| `src/common/theme_config.js` | 主题归一化 | 统一缺省字段、背景/按钮路径解析 |
+| `src/common/theme_manager.js` | 主题管理 | 本地主题列表、校验（checksums）、应用/删除 |
+| `src/common/theme_transfer.js` | 主题传输落盘 | 分片写入、进度统计、完成后写快照 |
+| `src/common/utils.js` | 工具 | 时间格式化、短震动、简单防抖 |
+| `src/components/InputMethod/InputMethod.ux` | 自定义输入法 | 圆/方/胶囊屏，多键盘（QWERTY/T9），候选与拼音逻辑 |
+| `src/components/InputMethod/assets/dic.js` | 词库 | 中文词库数据 |
+| `src/components/InputMethod/assets/dicUtil.js` | 词库工具 | 拼音/候选处理辅助 |
+| `src/pages/init/init.ux` | 启动页 | 协议判断、Lisync 初始化与 `WATCH_READY` |
+| `src/pages/agreement/agreement.ux` | 协议页 | 长文本协议 + 同意入口 |
+| `src/pages/home/home.ux` | 首页 | 导航栅格 + 迷你播放器 + 订阅提示 |
+| `src/pages/search/search.ux` | 搜索页 | 自定义输入法、列表、下载入口 |
+| `src/pages/search/search_old.ux` | 旧搜索页 | UTF-16LE 旧实现，未在 manifest 路由中启用 |
+| `src/pages/local/local.ux` | 本地页 | 本地歌曲列表 + 二次确认删除 |
+| `src/pages/library/library.ux` | 收藏页 | 收藏列表 + 二次确认删除 |
+| `src/pages/player/player.ux` | 播放页 | 歌曲播放/进度/歌词/音量/播放模式 |
+| `src/pages/settings/settings.ux` | 设置页 | 数据源、平台、歌词开关/偏移、定时停止、清理 |
+| `src/pages/theme/theme.ux` | 主题页 | 内置/本地主题切换与删除，日志上报 |
+| `src/pages/theme_download/theme_download.ux` | 主题接收页 | 主题传输中转与进度展示 |
+| `src/pages/download/download.ux` | 下载页 | 下载进度与状态提示 |
+| `src/pages/subscription/subscription.ux` | 订阅页 | 设备 ID、二维码、激活与清理 |
+| `src/pages/about/about.ux` | 关于页 | 版本信息与调试日志面板 |
+| `src/assets/config/theme_light.js` | 内置主题 | light 主题参数 |
+| `src/assets/config/theme_dark.js` | 内置主题 | dark 主题参数 |
+| `src/assets/themes/test_theme/theme.json` | 测试主题 | 示例主题包（含背景图与按钮资源） |
+| `src/i18n/defaults.json` | i18n | 默认占位，未见实用入口 |
+| `src/i18n/zh-CN.json` | i18n | 中文占位 |
+| `src/i18n/en.json` | i18n | 英文占位 |
+| `src/config-watch.json` | 设备配置 | 当前为空对象 |
 # 氦音乐 (HeMusic) 项目完整概览
 
 ## 📋 目录
@@ -27,7 +102,7 @@
 |-|-|
 |**项目名称**|氦音乐 (HeMusic)|
 |**包名**|`mindrift.app.music`|
-|**版本**|2.0-换芯 (versionCode: 2)|
+|**版本**|1.5-换芯 (versionCode: 2)|
 |**目标平台**|小米 Vela OS 快应用|
 |**设备类型**|智能手表/手环|
 |**最低平台版本**|1000|
@@ -40,10 +115,11 @@
 
 ### 1.3 核心特性
 
-* 🎵 **多平台音乐支持**：QQ音乐、网易云音乐、酷狗音乐
+* 🎵 **多平台音乐支持**：通过 Lisync 调用手机端脚本/服务提供的源（平台随手机端配置变化）
 * 📥 **离线下载**：支持音频和歌词文件下载
 * 🎤 **歌词同步**：实时歌词显示，支持偏移校准
 * 🎨 **主题系统**：内置亮色/暗色主题，支持自定义主题下载
+* 📦 **主题传输**：手机端通过互联通道下发主题包到设备
 * 🔒 **许可证验证**：HMAC-SHA256签名验证，设备绑定
 * 📱 **穿戴设备优化**：自定义输入法，触觉反馈，手势支持
 * ⚙️ **自定义数据源**：用户可配置自己的API服务器
@@ -607,11 +683,12 @@ getPlayModeText(mode) {
    * 支持拼音输入
    * 支持数字和符号输入
 
-2. **多平台搜索**
+2. **多平台搜索（经 Lisync 手机端脚本）**
 
    * QQ音乐 (tx)
    * 网易云音乐 (wy)
    * 酷狗音乐 (kg)
+   * 平台枚举由设置页固定配置，实际数据由手机端脚本提供
 
 3. **搜索结果**
 
@@ -946,8 +1023,8 @@ async removeFavorite(item) {
 
 2. **自定义数据源**
 
-   * 启用/禁用
-   * 配置API地址
+   * 仅配置 Base URL（无显式开关）
+   * 存储键：`music_api_base`
 
 3. **歌词设置**
 
@@ -974,7 +1051,7 @@ async removeFavorite(item) {
    * 清空配置（保留本地音乐）
    * 清空所有下载
 
-**自定义源配置**:
+**自定义源配置（当前实现）**:
 
 ```javascript
 applyCustomSource() {
@@ -1168,6 +1245,29 @@ async deleteTheme(theme) {
   }
 }
 ```
+
+**当前实现说明**:
+
+- 手表端 `theme_manager.downloadTheme` 需要 `api.getThemeInfo`；目前 watch 端默认返回“暂不支持下载”，主题主要通过手机端传输（`theme_download` 中转页）。
+
+### 3.9.1 主题传输中转页 (ThemeDownload)
+
+**文件位置**: `src/pages/theme_download/theme_download.ux`
+
+**功能描述**:
+与手机端互联消息配合，作为主题传输的中转与状态展示页面；在收到 `theme.open` 时由 `src/common/lisync.js` 导航进入。
+
+**关键流程**:
+
+1. `theme.open` → 打开中转页并提示等待发送
+2. `theme.init` → 初始化传输状态与目录
+3. `theme.file.start/chunk/finish` → 分片写入 `internal://files/themes/<id>/`
+4. `theme.finish` → 读取并应用 `theme.json`，写入 `theme_snapshot` 与 `current_theme_id`
+
+**注意事项**:
+
+- 大文件传输需快速回执（避免发送端超时取消）
+- 背景图样式使用 `<uri>` 直传（不使用 `url(...)` 包裹）
 
 ---
 

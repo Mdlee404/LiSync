@@ -26,6 +26,27 @@
 ```json
 {
   "action": "WATCH_READY",
+  "version": "1.5",
+  "_requestId": "req_17273849123_1"
+}
+```
+
+`version` 为手表端版本号（建议必传，字符串）。Android 端也兼容以下等价写法：
+
+```json
+{
+  "action": "WATCH_READY",
+  "watchVersion": "1.5",
+  "_requestId": "req_17273849123_1"
+}
+```
+
+或：
+
+```json
+{
+  "action": "WATCH_READY",
+  "watch": { "version": "1.5" },
   "_requestId": "req_17273849123_1"
 }
 ```

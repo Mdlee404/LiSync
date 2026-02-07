@@ -211,6 +211,12 @@ public class ThemeTransferActivity extends AppCompatActivity {
                     updateTransferState(false);
                     cleanupExtractedDir();
                     Toast.makeText(ThemeTransferActivity.this, getString(R.string.theme_transfer_status_finished), Toast.LENGTH_SHORT).show();
+                    new com.google.android.material.dialog.MaterialAlertDialogBuilder(ThemeTransferActivity.this)
+                            .setTitle(getString(R.string.dialog_common_title))
+                            .setMessage(getString(R.string.theme_transfer_restart_prompt))
+                            .setPositiveButton(getString(R.string.action_confirm), null)
+                            .setCancelable(false)
+                            .show();
                 });
             }
 

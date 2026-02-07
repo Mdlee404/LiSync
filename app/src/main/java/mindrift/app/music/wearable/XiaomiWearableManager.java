@@ -77,7 +77,7 @@ public class XiaomiWearableManager {
     private static final int UPLOAD_CHUNK_SIZE = 8 * 1024;
     private static final long UPLOAD_TIMEOUT_MS = 30000L;
     private static final int THEME_CHUNK_SIZE = 8 * 1024;
-    private static final long THEME_TIMEOUT_MS = 2000L;
+    private static final long THEME_TIMEOUT_MS = 15000L;
     private static final long THEME_FINISH_DELAY_MS = 100L;
     private static final int THEME_FINISH_RETRY_COUNT = 1;
     private static final long THEME_FINISH_RETRY_DELAY_MS = 200L;
@@ -410,7 +410,7 @@ public class XiaomiWearableManager {
                 return;
             }
             if (ACTION_WATCH_READY.equalsIgnoreCase(action)) {
-                handleWatchReady(nodeId, requestId);
+                handleWatchReady(nodeId, json, requestId);
                 return;
             }
             if (ACTION_LOG_UPLOAD.equalsIgnoreCase(action)) {
@@ -591,8 +591,20 @@ public class XiaomiWearableManager {
         sendMessage(nodeId, gson.toJson(buildSuccessPayload(ACTION_LOG_UPLOAD_RESULT, null, null, requestId)));
     }
 
-    private void handleWatchReady(String nodeId, String requestId) {
-        Logger.info("Watch ready received: node=" + nodeId);
+    private void handleWatchReady(String nodeId, JsonObject json, String requestId) {
+        String watchVersion = getString(json, "version");
+        if (watchVersion == null || watchVersion.trim().isEmpty()) {
+            watchVersion = getString(json, "watchVersion");
+        }
+        JsonObject watch = json == null ? null : json.getAsJsonObject("watch");
+        if ((watchVersion == null || watchVersion.trim().isEmpty()) && watch != null) {
+            watchVersion = getString(watch, "version");
+        }
+        if (watchVersion == null || watchVersion.trim().isEmpty()) {
+            Logger.info("Watch ready received: node=" + nodeId + " watchVersion=unknown");
+        } else {
+            Logger.info("Watch ready received: node=" + nodeId + " watchVersion=" + watchVersion.trim());
+        }
         Map<String, Object> ack = new HashMap<>();
         ack.put("action", ACTION_WATCH_READY_ACK);
         ack.put("code", 0);
