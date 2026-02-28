@@ -2,6 +2,7 @@ package mindrift.app.music.ui;
 
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.text.InputType;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
@@ -21,11 +22,21 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import mindrift.app.music.App;
 import mindrift.app.music.R;
+import mindrift.app.music.core.proxy.RequestProxy;
+import mindrift.app.music.core.search.SearchService;
+import mindrift.app.music.core.script.ScriptInfo;
 import mindrift.app.music.core.script.ScriptManager;
+import mindrift.app.music.core.script.SourceInfo;
+import mindrift.app.music.model.ResolveRequest;
 
 public class ScriptCenterActivity extends AppCompatActivity {
+    private static final String CLOUD_LIBRARY_URL = "https://music.scriptlibrary.mindrift.cn/library.json";
+    private static final String CLOUD_SOURCE_BASE_URL = "https://music.scriptlibrary.mindrift.cn/sources/";
+    private static final String DEFAULT_TEST_KEYWORD = "周杰伦";
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final SearchService searchService = new SearchService();
     private ScriptManager scriptManager;
+    private RequestProxy requestProxy;
     private TextView scriptCountText;
     private AutoCompleteTextView scriptDropdown;
     private final java.util.List<ScriptOption> scriptOptions = new java.util.ArrayList<>();
@@ -39,6 +50,7 @@ public class ScriptCenterActivity extends AppCompatActivity {
 
         App app = (App) getApplication();
         scriptManager = app.getScriptManager();
+        requestProxy = app.getRequestProxy();
 
         scriptCountText = findViewById(R.id.text_script_count);
         scriptDropdown = findViewById(R.id.dropdown_script);
@@ -50,10 +62,12 @@ public class ScriptCenterActivity extends AppCompatActivity {
 
         MaterialButton importFileButton = findViewById(R.id.button_import_file);
         MaterialButton importUrlButton = findViewById(R.id.button_import_url);
+        MaterialButton importCloudButton = findViewById(R.id.button_import_cloud);
         MaterialButton reloadScriptsButton = findViewById(R.id.button_reload_scripts);
         MaterialButton editScriptButton = findViewById(R.id.button_script_edit);
         MaterialButton renameScriptButton = findViewById(R.id.button_script_rename);
         MaterialButton deleteScriptButton = findViewById(R.id.button_script_delete);
+        MaterialButton testScriptButton = findViewById(R.id.button_script_test);
 
         importLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), this::handleImportFile);
         importFileButton.setOnClickListener(v -> importLauncher.launch(new String[] {
@@ -63,6 +77,7 @@ public class ScriptCenterActivity extends AppCompatActivity {
                 "text/plain"
         }));
         importUrlButton.setOnClickListener(v -> showImportUrlDialog());
+        importCloudButton.setOnClickListener(v -> showCloudRepoDialog());
         reloadScriptsButton.setOnClickListener(v -> {
             scriptManager.loadScripts();
             refreshData();
@@ -70,6 +85,7 @@ public class ScriptCenterActivity extends AppCompatActivity {
         editScriptButton.setOnClickListener(v -> showEditScriptDialog());
         renameScriptButton.setOnClickListener(v -> showRenameScriptDialog());
         deleteScriptButton.setOnClickListener(v -> confirmDeleteScript());
+        testScriptButton.setOnClickListener(v -> quickTestCurrentScript());
 
         refreshData();
     }
@@ -78,6 +94,7 @@ public class ScriptCenterActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         executor.shutdown();
+        searchService.shutdown();
     }
 
     private void refreshData() {
@@ -122,6 +139,270 @@ public class ScriptCenterActivity extends AppCompatActivity {
             }
         }
         return scriptLabel;
+    }
+
+    private void showCloudRepoDialog() {
+        loadCloudRepo();
+    }
+
+    private void loadCloudRepo() {
+        Toast.makeText(this, getString(R.string.cloud_repo_loading), Toast.LENGTH_SHORT).show();
+        executor.execute(() -> {
+            try {
+                ScriptManager.CloudRepoIndex index = scriptManager.fetchCloudRepoIndex(CLOUD_LIBRARY_URL);
+                List<ScriptManager.CloudScriptEntry> scripts = index == null ? null : index.getScripts();
+                if (scripts == null || scripts.isEmpty()) {
+                    runOnUiThread(() -> Toast.makeText(this, getString(R.string.cloud_repo_empty), Toast.LENGTH_SHORT).show());
+                    return;
+                }
+                runOnUiThread(() -> showCloudRepoPicker(index));
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        getString(R.string.cloud_repo_load_failed, e.getMessage() == null ? "unknown" : e.getMessage()),
+                        Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void showCloudRepoPicker(ScriptManager.CloudRepoIndex index) {
+        List<ScriptManager.CloudScriptEntry> scripts = index.getScripts();
+        if (scripts == null || scripts.isEmpty()) return;
+        String[] labels = new String[scripts.size()];
+        for (int i = 0; i < scripts.size(); i++) {
+            ScriptManager.CloudScriptEntry entry = scripts.get(i);
+            String name = entry == null ? "" : entry.getName();
+            String desc = entry == null ? "" : entry.getDescription();
+            labels[i] = desc == null || desc.isEmpty() ? name : (name + " - " + desc);
+        }
+        String repoName = index.getRepoName();
+        String title = (repoName == null || repoName.isEmpty())
+                ? getString(R.string.cloud_repo_picker_title)
+                : getString(R.string.cloud_repo_picker_title_with_name, repoName);
+
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(title)
+                .setItems(labels, (dialog, which) -> importCloudScript(scripts.get(which)))
+                .setNegativeButton(getString(R.string.cancel_button), null)
+                .show();
+    }
+
+    private void importCloudScript(ScriptManager.CloudScriptEntry entry) {
+        if (entry == null) return;
+        Toast.makeText(this, getString(R.string.cloud_repo_importing), Toast.LENGTH_SHORT).show();
+        executor.execute(() -> {
+            String importUrl = buildCloudImportUrl(entry);
+            if (importUrl == null || importUrl.isEmpty()) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        getString(R.string.cloud_repo_load_failed, "invalid script url"),
+                        Toast.LENGTH_LONG).show());
+                return;
+            }
+            String importedScriptId = null;
+            try {
+                java.io.File imported = scriptManager.importFromUrlSync(importUrl);
+                if (imported != null) {
+                    importedScriptId = imported.getName();
+                }
+            } catch (Exception e) {
+                final String error = e.getMessage() == null ? "unknown" : e.getMessage();
+                runOnUiThread(() -> Toast.makeText(this,
+                        getString(R.string.cloud_repo_load_failed, error),
+                        Toast.LENGTH_LONG).show());
+                return;
+            }
+
+            scriptManager.loadScripts();
+            String testedScriptId = importedScriptId;
+            runOnUiThread(() -> {
+                refreshData();
+                Toast.makeText(this, getString(R.string.script_op_success), Toast.LENGTH_SHORT).show();
+            });
+            if (testedScriptId != null && !testedScriptId.trim().isEmpty()) {
+                runCloudInitTests(java.util.Collections.singletonList(testedScriptId));
+            }
+        });
+    }
+
+    private void quickTestCurrentScript() {
+        String scriptId = getSelectedScriptId();
+        if (scriptId == null || scriptId.trim().isEmpty()) return;
+        if (requestProxy == null) {
+            Toast.makeText(this, getString(R.string.script_test_failed, "RequestProxy unavailable"), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Toast.makeText(this, getString(R.string.script_test_running), Toast.LENGTH_SHORT).show();
+        executor.execute(() -> {
+            long start = SystemClock.elapsedRealtime();
+            try {
+                ScriptInfo info = scriptManager.getScriptInfo(scriptId);
+                String source = pickQuickTestSource(info);
+                if (source == null) {
+                    runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title),
+                            getString(R.string.script_test_unsupported_platform)));
+                    return;
+                }
+                SearchService.SearchResult searchResult = searchService.search(source, DEFAULT_TEST_KEYWORD, 1, 1);
+                if (searchResult == null || searchResult.results == null || searchResult.results.isEmpty()) {
+                    runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title),
+                            getString(R.string.script_test_failed, "search seed song failed")));
+                    return;
+                }
+                String songId = searchResult.results.get(0).id;
+                ResolveRequest request = new ResolveRequest();
+                request.setSource(source);
+                request.setAction("musicUrl");
+                request.setQuality("128k");
+                request.setNocache(true);
+                request.setTargetScriptId(scriptId);
+                ResolveRequest.MusicInfo musicInfo = new ResolveRequest.MusicInfo();
+                musicInfo.songmid = songId;
+                musicInfo.hash = songId;
+                request.setMusicInfo(musicInfo);
+                String response = requestProxy.resolveSync(request);
+                String url = extractResolvedUrl(response);
+                long costMs = SystemClock.elapsedRealtime() - start;
+                if (url == null || url.isEmpty()) {
+                    runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title),
+                            getString(R.string.script_test_failed, "no playable url")));
+                    return;
+                }
+                String message = getString(R.string.script_test_success, source, costMs) + "\n" + url;
+                runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title), message));
+            } catch (Exception e) {
+                String message = e.getMessage() == null ? "unknown" : e.getMessage();
+                runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title),
+                        getString(R.string.script_test_failed, message)));
+            }
+        });
+    }
+
+    private String buildCloudImportUrl(ScriptManager.CloudScriptEntry entry) {
+        if (entry == null) return null;
+        String directUrl = entry.getUrl();
+        if (directUrl != null) {
+            String trimmed = directUrl.trim();
+            if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+                return trimmed;
+            }
+        }
+        String name = entry.getName();
+        if (name == null || name.trim().isEmpty()) return null;
+        String normalized = name.trim();
+        if (normalized.endsWith(".js")) {
+            normalized = normalized.substring(0, normalized.length() - 3);
+        }
+        if (normalized.isEmpty()) return null;
+        return CLOUD_SOURCE_BASE_URL + normalized + ".js";
+    }
+
+    private void runCloudInitTests(List<String> scriptIds) {
+        if (scriptIds == null || scriptIds.isEmpty()) return;
+        int available = 0;
+        int unavailable = 0;
+        for (String scriptId : scriptIds) {
+            if (scriptId == null || scriptId.trim().isEmpty()) {
+                unavailable++;
+                continue;
+            }
+            boolean ok = testScriptAvailability(scriptId.trim());
+            if (ok) {
+                available++;
+            } else {
+                unavailable++;
+            }
+        }
+        int finalAvailable = available;
+        int finalUnavailable = unavailable;
+        runOnUiThread(() -> showTestDialog(
+                getString(R.string.script_test_result_title),
+                getString(R.string.cloud_test_finished, finalAvailable, finalUnavailable)
+        ));
+    }
+
+    private boolean testScriptAvailability(String scriptId) {
+        if (requestProxy == null || scriptId == null || scriptId.isEmpty()) return false;
+        try {
+            ScriptInfo info = scriptManager.getScriptInfo(scriptId);
+            String source = pickQuickTestSource(info);
+            if (source == null) return false;
+            SearchService.SearchResult searchResult = searchService.search(source, DEFAULT_TEST_KEYWORD, 1, 1);
+            if (searchResult == null || searchResult.results == null || searchResult.results.isEmpty()) {
+                return false;
+            }
+            String songId = searchResult.results.get(0).id;
+            if (songId == null || songId.trim().isEmpty()) {
+                return false;
+            }
+            ResolveRequest request = new ResolveRequest();
+            request.setSource(source);
+            request.setAction("musicUrl");
+            request.setQuality("128k");
+            request.setNocache(true);
+            request.setTargetScriptId(scriptId);
+            ResolveRequest.MusicInfo musicInfo = new ResolveRequest.MusicInfo();
+            musicInfo.songmid = songId;
+            musicInfo.hash = songId;
+            request.setMusicInfo(musicInfo);
+            String response = requestProxy.resolveSync(request);
+            String url = extractResolvedUrl(response);
+            return url != null && !url.trim().isEmpty();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private String pickQuickTestSource(ScriptInfo info) {
+        if (info == null || info.getSources() == null || info.getSources().isEmpty()) {
+            return null;
+        }
+        String[] preferred = new String[] {"tx", "wy", "kg"};
+        for (String source : preferred) {
+            SourceInfo sourceInfo = info.getSources().get(source);
+            if (sourceInfo == null) continue;
+            if (sourceInfo.getType() != null && !"music".equalsIgnoreCase(sourceInfo.getType())) continue;
+            List<String> actions = sourceInfo.getActions();
+            if (actions == null || actions.isEmpty() || actions.contains("musicUrl")) {
+                return source;
+            }
+        }
+        return null;
+    }
+
+    private String extractResolvedUrl(String response) {
+        if (response == null || response.trim().isEmpty()) return null;
+        try {
+            com.google.gson.JsonElement element = com.google.gson.JsonParser.parseString(response);
+            if (!element.isJsonObject()) return null;
+            com.google.gson.JsonObject obj = element.getAsJsonObject();
+            if (obj.has("url") && obj.get("url").isJsonPrimitive()) {
+                return obj.get("url").getAsString();
+            }
+            if (obj.has("data")) {
+                com.google.gson.JsonElement data = obj.get("data");
+                if (data != null && data.isJsonPrimitive()) {
+                    String value = data.getAsString();
+                    if (value.startsWith("http://") || value.startsWith("https://")) {
+                        return value;
+                    }
+                } else if (data != null && data.isJsonObject()) {
+                    com.google.gson.JsonObject dataObj = data.getAsJsonObject();
+                    if (dataObj.has("url") && dataObj.get("url").isJsonPrimitive()) {
+                        return dataObj.get("url").getAsString();
+                    }
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void showTestDialog(String title, String message) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton(getString(R.string.action_confirm), null)
+                .show();
     }
 
     private void showImportUrlDialog() {

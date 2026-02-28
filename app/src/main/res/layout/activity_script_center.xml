@@ -95,13 +95,29 @@
                             android:text="@string/action_import_url" />
                     </LinearLayout>
 
-                    <Button
-                        android:id="@+id/button_reload_scripts"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:text="@string/action_reload_scripts" />
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/button_import_cloud"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="8dp"
+                            android:text="@string/action_import_cloud_repo" />
+
+                        <Button
+                            android:id="@+id/button_reload_scripts"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/action_reload_scripts" />
+                    </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -152,6 +168,13 @@
                     android:text="@string/action_delete_script"
                     android:textColor="?attr/colorError" />
             </LinearLayout>
+
+            <Button
+                android:id="@+id/button_script_test"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/action_script_quick_test" />
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>

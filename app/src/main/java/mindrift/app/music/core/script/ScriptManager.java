@@ -3,6 +3,10 @@ package mindrift.app.music.core.script;
 import android.content.Context;
 import android.content.res.AssetManager;
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -56,6 +60,54 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
         public String name;
         public String log;
         public String updateUrl;
+    }
+
+    public static class CloudScriptEntry {
+        private final String name;
+        private final String url;
+        private final String description;
+
+        public CloudScriptEntry(String name, String url, String description) {
+            this.name = name == null ? "" : name;
+            this.url = url == null ? "" : url;
+            this.description = description == null ? "" : description;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public String getUrl() {
+            return url;
+        }
+
+        public String getDescription() {
+            return description;
+        }
+    }
+
+    public static class CloudRepoIndex {
+        private final String repoName;
+        private final String sourceUrl;
+        private final List<CloudScriptEntry> scripts;
+
+        public CloudRepoIndex(String repoName, String sourceUrl, List<CloudScriptEntry> scripts) {
+            this.repoName = repoName == null ? "" : repoName;
+            this.sourceUrl = sourceUrl == null ? "" : sourceUrl;
+            this.scripts = scripts == null ? new ArrayList<>() : scripts;
+        }
+
+        public String getRepoName() {
+            return repoName;
+        }
+
+        public String getSourceUrl() {
+            return sourceUrl;
+        }
+
+        public List<CloudScriptEntry> getScripts() {
+            return scripts;
+        }
     }
 
     public ScriptManager(Context context) {
@@ -274,6 +326,36 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
                 callback.onFailure(e);
             }
         });
+    }
+
+    public File importFromUrlSync(String url) throws Exception {
+        Map<String, Object> options = new HashMap<>();
+        options.put("method", "GET");
+        HttpClient.ResponseData response = httpClient.requestSync(url, options);
+        if (response == null) {
+            throw new IOException("Empty response");
+        }
+        if (response.code < 200 || response.code >= 300) {
+            throw new IOException("HTTP " + response.code);
+        }
+        String fileName = deriveFileName(url, response.headers);
+        try (InputStream input = new ByteArrayInputStream((response.body == null ? "" : response.body).getBytes(StandardCharsets.UTF_8))) {
+            return importFromStream(fileName, input);
+        }
+    }
+
+    public CloudRepoIndex fetchCloudRepoIndex(String indexUrl) throws Exception {
+        Map<String, Object> options = new HashMap<>();
+        options.put("method", "GET");
+        options.put("timeout", 8000);
+        HttpClient.ResponseData response = httpClient.requestSync(indexUrl, options);
+        if (response == null) {
+            throw new IOException("Empty response");
+        }
+        if (response.code < 200 || response.code >= 300) {
+            throw new IOException("HTTP " + response.code);
+        }
+        return parseCloudRepoIndex(indexUrl, response.body);
     }
 
     public ScriptHandler getHandlerById(String source, String scriptId, String action) {
@@ -521,6 +603,174 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
             name = idx >= 0 ? url.substring(idx + 1) : "script_" + System.currentTimeMillis();
         }
         return sanitizeFileName(name);
+    }
+
+    private CloudRepoIndex parseCloudRepoIndex(String indexUrl, String body) throws IOException {
+        if (body == null || body.trim().isEmpty()) {
+            return new CloudRepoIndex("", indexUrl, new ArrayList<>());
+        }
+        JsonElement root;
+        try {
+            root = JsonParser.parseString(body);
+        } catch (Exception e) {
+            throw new IOException("Invalid repository index");
+        }
+        List<CloudScriptEntry> entries = new ArrayList<>();
+        String repoName = "";
+        if (root != null && root.isJsonObject()) {
+            JsonObject obj = root.getAsJsonObject();
+            repoName = firstNonEmpty(
+                    getJsonString(obj, "repoName"),
+                    getJsonString(obj, "name"),
+                    getJsonString(obj, "title")
+            );
+            JsonArray scripts = getJsonArray(obj, "scripts");
+            if (scripts == null) scripts = getJsonArray(obj, "items");
+            if (scripts == null) scripts = getJsonArray(obj, "list");
+            addCloudEntries(entries, scripts, indexUrl);
+        } else if (root != null && root.isJsonArray()) {
+            addCloudEntries(entries, root.getAsJsonArray(), indexUrl);
+        }
+        Map<String, CloudScriptEntry> deduped = new LinkedHashMap<>();
+        for (CloudScriptEntry entry : entries) {
+            if (entry == null || entry.getUrl().isEmpty()) continue;
+            if (!deduped.containsKey(entry.getUrl())) {
+                deduped.put(entry.getUrl(), entry);
+            }
+        }
+        return new CloudRepoIndex(repoName, indexUrl, new ArrayList<>(deduped.values()));
+    }
+
+    private void addCloudEntries(List<CloudScriptEntry> out, JsonArray array, String indexUrl) {
+        if (out == null || array == null) return;
+        for (JsonElement element : array) {
+            CloudScriptEntry entry = parseCloudEntry(element, indexUrl);
+            if (entry != null) {
+                out.add(entry);
+            }
+        }
+    }
+
+    private CloudScriptEntry parseCloudEntry(JsonElement element, String indexUrl) {
+        if (element == null || element.isJsonNull()) return null;
+        if (element.isJsonPrimitive()) {
+            String rawValue = element.getAsString();
+            if (rawValue == null || rawValue.trim().isEmpty()) return null;
+            String value = rawValue.trim();
+            String url = toAbsoluteUrl(indexUrl, value);
+            String name = isHttpUrl(value) ? deriveFileName(value, null) : normalizeScriptName(value);
+            return new CloudScriptEntry(name, url, "");
+        }
+        if (!element.isJsonObject()) return null;
+        JsonObject obj = element.getAsJsonObject();
+        String url = firstNonEmpty(
+                getJsonString(obj, "url"),
+                getJsonString(obj, "scriptUrl"),
+                getJsonString(obj, "downloadUrl"),
+                getJsonString(obj, "raw")
+        );
+        String name = firstNonEmpty(
+                getJsonString(obj, "name"),
+                getJsonString(obj, "fileName"),
+                getJsonString(obj, "id")
+        );
+        if ((name == null || name.isEmpty()) && url != null && !url.isEmpty()) {
+            name = deriveFileName(url, null);
+        }
+        if ((url == null || url.isEmpty()) && name != null && !name.isEmpty()) {
+            url = toAbsoluteUrl(indexUrl, normalizeScriptName(name));
+        }
+        if (url == null || url.isEmpty()) return null;
+        if (name == null || name.isEmpty()) {
+            name = deriveFileName(url, null);
+        }
+        String description = firstNonEmpty(
+                getJsonString(obj, "description"),
+                getJsonString(obj, "desc"),
+                getJsonString(obj, "note")
+        );
+        return new CloudScriptEntry(name, url, description);
+    }
+
+    private JsonArray getJsonArray(JsonObject obj, String key) {
+        if (obj == null || key == null || !obj.has(key)) return null;
+        JsonElement element = obj.get(key);
+        return element != null && element.isJsonArray() ? element.getAsJsonArray() : null;
+    }
+
+    private String getJsonString(JsonObject obj, String key) {
+        if (obj == null || key == null || !obj.has(key)) return null;
+        JsonElement element = obj.get(key);
+        if (element == null || element.isJsonNull()) return null;
+        try {
+            String value = element.getAsString();
+            if (value == null) return null;
+            String trimmed = value.trim();
+            return trimmed.isEmpty() ? null : trimmed;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String firstNonEmpty(String... values) {
+        if (values == null) return null;
+        for (String value : values) {
+            if (value != null && !value.trim().isEmpty()) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
+
+    private boolean isHttpUrl(String value) {
+        if (value == null) return false;
+        String trimmed = value.trim().toLowerCase();
+        return trimmed.startsWith("http://") || trimmed.startsWith("https://");
+    }
+
+    private String normalizeScriptName(String value) {
+        if (value == null) return "";
+        String name = value.trim();
+        if (name.isEmpty()) return "";
+        if (name.endsWith(".js")) {
+            name = name.substring(0, name.length() - 3);
+        }
+        return sanitizeFileName(name);
+    }
+
+    private String toAbsoluteUrl(String indexUrl, String value) {
+        if (value == null || value.trim().isEmpty()) return "";
+        String raw = value.trim();
+        if (isHttpUrl(raw)) return raw;
+        String root = deriveCloudRoot(indexUrl);
+        if (raw.startsWith("sources/")) {
+            return root + "/" + raw;
+        }
+        if (raw.startsWith("/sources/")) {
+            return root + raw;
+        }
+        if (raw.startsWith("/")) {
+            return root + raw;
+        }
+        String scriptName = normalizeScriptName(raw);
+        if (scriptName.isEmpty()) return "";
+        return root + "/sources/" + scriptName + ".js";
+    }
+
+    private String deriveCloudRoot(String indexUrl) {
+        if (indexUrl == null || indexUrl.trim().isEmpty()) {
+            return "https://music.scriptlibrary.mindrift.cn";
+        }
+        String trimmed = indexUrl.trim();
+        int idx = trimmed.indexOf("://");
+        if (idx <= 0) {
+            return "https://music.scriptlibrary.mindrift.cn";
+        }
+        int slash = trimmed.indexOf('/', idx + 3);
+        if (slash < 0) {
+            return trimmed;
+        }
+        return trimmed.substring(0, slash);
     }
 
     private void notifyScriptsChanged() {

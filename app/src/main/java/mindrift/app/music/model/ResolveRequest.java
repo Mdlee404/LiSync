@@ -10,7 +10,7 @@ public class ResolveRequest {
     private String action;
     private String quality;
     private boolean nocache;
-    @SerializedName("targetScriptId")
+    @SerializedName(value = "targetScriptId", alternate = {"scriptId", "provider", "target_script_id", "targetScript"})
     private String targetScriptId;
     private MusicInfo musicInfo;
     @SerializedName(value = "songid", alternate = {"id", "songId", "songID"})

@@ -153,10 +153,12 @@
   "platform": "tx",
   "id": "001X0PDf0W4lBq", // 歌曲唯一ID
   "quality": "128k",      // 请求音质: 128k/320k/flac/flac24bit
+  "targetScriptId": "your-script.js", // 可选，指定优先音源脚本
   "nocache": false,       // true 表示强制刷新，忽略缓存
   "_requestId": "req_17273849123_3"
 }
 ```
+`targetScriptId` 也兼容以下别名：`scriptId` / `provider` / `target_script_id` / `targetScript`。
 
 #### 响应 (Phone -> Watch) - 成功
 ```json
@@ -311,6 +313,30 @@
 该协议包含 `theme.open / theme.init / theme.file.* / theme.finish` 等指令，手表端会写入：
 
 `internal://files/themes/{themeId}/`
+
+---
+
+### 2.8 云端源仓库索引（预留）
+Android 端已预留云端音源仓库入口，索引建议使用以下格式：
+
+```json
+{
+  "repoName": "LiSync Cloud Sources",
+  "scripts": [
+    {
+      "name": "示例音源.js",
+      "url": "https://example.com/sources/demo.js",
+      "description": "支持 tx/wy/kg"
+    }
+  ]
+}
+```
+
+兼容字段：
+- 顶层列表：`scripts` / `items` / `list`
+- 脚本下载地址：`url` / `scriptUrl` / `downloadUrl` / `raw`
+- 脚本名：`name` / `fileName` / `id`
+- 描述：`description` / `desc` / `note`
 
 ---
 
