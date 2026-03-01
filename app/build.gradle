@@ -28,8 +28,8 @@ android {
         applicationId "mindrift.app.music"
         minSdk 28
         targetSdk 34
-        versionCode 1
-        versionName "1.0.0"
+        versionCode 2
+        versionName "1.1.1"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
@@ -93,6 +93,7 @@ dependencies {
     implementation libs.gson
     implementation libs.lifecycle.common.java8
     implementation libs.documentfile
+    implementation libs.viewpager2
     
     // Cache (Room for Java)
     implementation libs.room.runtime

@@ -41,6 +41,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
+import mindrift.app.music.App;
 import mindrift.app.music.core.lyric.LyricService;
 import mindrift.app.music.core.script.ScriptManager;
 import mindrift.app.music.core.search.SearchService;
@@ -56,6 +57,8 @@ public class XiaomiWearableManager {
     private static final String ACTION_CAPABILITIES_UPDATE = "capabilitiesUpdate";
     private static final String ACTION_WATCH_READY = "WATCH_READY";
     private static final String ACTION_WATCH_READY_ACK = "WATCH_READY_ACK";
+    private static final String ACTION_VERSION_CHECK = "version.check";
+    private static final String ACTION_VERSION_CHECK_RESULT = "version.check.result";
     private static final String ACTION_SEARCH = "search";
     private static final String ACTION_LYRIC = "lyric";
     private static final String ACTION_GET_LYRIC = "getLyric";
@@ -413,6 +416,10 @@ public class XiaomiWearableManager {
                 handleWatchReady(nodeId, json, requestId);
                 return;
             }
+            if (ACTION_VERSION_CHECK.equalsIgnoreCase(action)) {
+                handleVersionCheck(nodeId, json, requestId);
+                return;
+            }
             if (ACTION_LOG_UPLOAD.equalsIgnoreCase(action)) {
                 handleLogUpload(nodeId, json, requestId);
                 return;
@@ -592,14 +599,7 @@ public class XiaomiWearableManager {
     }
 
     private void handleWatchReady(String nodeId, JsonObject json, String requestId) {
-        String watchVersion = getString(json, "version");
-        if (watchVersion == null || watchVersion.trim().isEmpty()) {
-            watchVersion = getString(json, "watchVersion");
-        }
-        JsonObject watch = json == null ? null : json.getAsJsonObject("watch");
-        if ((watchVersion == null || watchVersion.trim().isEmpty()) && watch != null) {
-            watchVersion = getString(watch, "version");
-        }
+        String watchVersion = extractWatchVersion(json);
         if (watchVersion == null || watchVersion.trim().isEmpty()) {
             Logger.info("Watch ready received: node=" + nodeId + " watchVersion=unknown");
         } else {
@@ -614,6 +614,45 @@ public class XiaomiWearableManager {
         }
         sendMessage(nodeId, gson.toJson(ack));
         sendCapabilities(nodeId, true, null);
+    }
+
+    private void handleVersionCheck(String nodeId, JsonObject json, String requestId) {
+        String watchVersion = extractWatchVersion(json);
+        if (watchVersion == null || watchVersion.trim().isEmpty()) {
+            Logger.info("Version check request: node=" + nodeId + " watchVersion=unknown");
+        } else {
+            Logger.info("Version check request: node=" + nodeId + " watchVersion=" + watchVersion.trim());
+        }
+        try {
+            App app = context.getApplicationContext() instanceof App
+                    ? (App) context.getApplicationContext()
+                    : null;
+            Map<String, Object> data = app == null ? new HashMap<>() : app.buildVersionCheckData();
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("action", ACTION_VERSION_CHECK_RESULT);
+            payload.put("code", 0);
+            payload.put("message", "ok");
+            if (requestId != null && !requestId.isEmpty()) {
+                payload.put("_requestId", requestId);
+            }
+            payload.put("data", data == null ? new HashMap<>() : data);
+            sendMessage(nodeId, gson.toJson(payload));
+        } catch (Exception e) {
+            Logger.warn("Version check response failed: " + e.getMessage());
+            sendMessage(nodeId, gson.toJson(buildErrorPayload(ACTION_VERSION_CHECK_RESULT, e.getMessage(), requestId)));
+        }
+    }
+
+    private String extractWatchVersion(JsonObject json) {
+        String watchVersion = getString(json, "version");
+        if (watchVersion == null || watchVersion.trim().isEmpty()) {
+            watchVersion = getString(json, "watchVersion");
+        }
+        JsonObject watch = json == null ? null : json.getAsJsonObject("watch");
+        if ((watchVersion == null || watchVersion.trim().isEmpty()) && watch != null) {
+            watchVersion = getString(watch, "version");
+        }
+        return watchVersion;
     }
 
     private Map<String, Object> buildSuccessPayload(String action, Map<String, Object> data, Map<String, Object> info, String requestId) {

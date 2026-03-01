@@ -8,7 +8,7 @@ public final class SettingsStore {
     private static final String KEY_FORCED_SCRIPT = "forced_script_id";
     private static final String KEY_FORCE_POLLING = "force_polling";
     private static final String KEY_CLOUD_REPO_URL = "cloud_repo_url";
-    private static final String DEFAULT_CLOUD_REPO_URL = "https://music.scriptlibrary.mindrift.cn/library.json";
+    private static final String DEFAULT_CLOUD_REPO_URL = "https://music.scriptlibrary.mindrift.cn/sources.json";
 
     private SettingsStore() {}
 

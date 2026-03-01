@@ -4,15 +4,19 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.text.InputType;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.appcompat.app.AppCompatActivity;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.documentfile.provider.DocumentFile;
-import com.google.android.material.button.MaterialButton;
+import androidx.fragment.app.Fragment;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
@@ -29,91 +33,109 @@ import mindrift.app.music.core.script.ScriptManager;
 import mindrift.app.music.core.script.SourceInfo;
 import mindrift.app.music.model.ResolveRequest;
 
-public class ScriptCenterActivity extends AppCompatActivity {
+public class SourceFragment extends Fragment {
     private static final String CLOUD_LIBRARY_URL = "https://music.scriptlibrary.mindrift.cn/sources.json";
     private static final String CLOUD_SOURCE_BASE_URL = "https://music.scriptlibrary.mindrift.cn/sources/";
     private static final String DEFAULT_TEST_KEYWORD = "周杰伦";
+
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final SearchService searchService = new SearchService();
+    private final java.util.List<ScriptOption> scriptOptions = new java.util.ArrayList<>();
+
     private ScriptManager scriptManager;
     private RequestProxy requestProxy;
     private TextView scriptCountText;
     private AutoCompleteTextView scriptDropdown;
-    private final java.util.List<ScriptOption> scriptOptions = new java.util.ArrayList<>();
-    private ActivityResultLauncher<String[]> importLauncher;
     private String lastSelectedScriptId;
+    private ActivityResultLauncher<String[]> importLauncher;
+
+    @Nullable
+    @Override
+    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
+        return inflater.inflate(R.layout.fragment_source, container, false);
+    }
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_script_center);
+        importLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), this::handleImportFile);
+    }
 
-        App app = (App) getApplication();
+    @Override
+    public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
+        super.onViewCreated(view, savedInstanceState);
+        App app = (App) requireActivity().getApplication();
         scriptManager = app.getScriptManager();
         requestProxy = app.getRequestProxy();
 
-        scriptCountText = findViewById(R.id.text_script_count);
-        scriptDropdown = findViewById(R.id.dropdown_script);
-        scriptDropdown.setOnItemClickListener((parent, view, position, id) -> {
+        scriptCountText = view.findViewById(R.id.text_script_count);
+        scriptDropdown = view.findViewById(R.id.dropdown_script);
+        scriptDropdown.setOnItemClickListener((parent, itemView, position, id) -> {
             if (position >= 0 && position < scriptOptions.size()) {
                 lastSelectedScriptId = scriptOptions.get(position).scriptId;
             }
         });
 
-        MaterialButton importFileButton = findViewById(R.id.button_import_file);
-        MaterialButton importUrlButton = findViewById(R.id.button_import_url);
-        MaterialButton importCloudButton = findViewById(R.id.button_import_cloud);
-        MaterialButton reloadScriptsButton = findViewById(R.id.button_reload_scripts);
-        MaterialButton editScriptButton = findViewById(R.id.button_script_edit);
-        MaterialButton renameScriptButton = findViewById(R.id.button_script_rename);
-        MaterialButton deleteScriptButton = findViewById(R.id.button_script_delete);
-        MaterialButton testScriptButton = findViewById(R.id.button_script_test);
-
-        importLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), this::handleImportFile);
-        importFileButton.setOnClickListener(v -> importLauncher.launch(new String[] {
+        view.findViewById(R.id.button_import_file).setOnClickListener(v -> importLauncher.launch(new String[]{
                 "application/javascript",
                 "text/javascript",
                 "application/x-javascript",
                 "text/plain"
         }));
-        importUrlButton.setOnClickListener(v -> showImportUrlDialog());
-        importCloudButton.setOnClickListener(v -> showCloudRepoDialog());
-        reloadScriptsButton.setOnClickListener(v -> {
+        view.findViewById(R.id.button_import_url).setOnClickListener(v -> showImportUrlDialog());
+        view.findViewById(R.id.button_import_cloud).setOnClickListener(v -> loadCloudRepo());
+        view.findViewById(R.id.button_reload_scripts).setOnClickListener(v -> {
             scriptManager.loadScripts();
             refreshData();
         });
-        editScriptButton.setOnClickListener(v -> showEditScriptDialog());
-        renameScriptButton.setOnClickListener(v -> showRenameScriptDialog());
-        deleteScriptButton.setOnClickListener(v -> confirmDeleteScript());
-        testScriptButton.setOnClickListener(v -> quickTestCurrentScript());
+        view.findViewById(R.id.button_script_edit).setOnClickListener(v -> showEditScriptDialog());
+        view.findViewById(R.id.button_script_rename).setOnClickListener(v -> showRenameScriptDialog());
+        view.findViewById(R.id.button_script_delete).setOnClickListener(v -> confirmDeleteScript());
+        view.findViewById(R.id.button_script_test).setOnClickListener(v -> quickTestCurrentScript());
+
         refreshData();
     }
 
     @Override
-    protected void onDestroy() {
+    public void onResume() {
+        super.onResume();
+        refreshData();
+    }
+
+    @Override
+    public void onDestroyView() {
+        super.onDestroyView();
+        scriptCountText = null;
+        scriptDropdown = null;
+    }
+
+    @Override
+    public void onDestroy() {
         super.onDestroy();
-        executor.shutdown();
+        executor.shutdownNow();
         searchService.shutdown();
     }
 
     private void refreshData() {
+        if (!isAdded() || scriptManager == null) return;
         executor.execute(() -> {
             List<ScriptManager.ScriptEntry> loadedScripts = scriptManager.getLoadedScripts();
-            runOnUiThread(() -> {
-                scriptCountText.setText(String.valueOf(loadedScripts.size()));
+            requireActivity().runOnUiThread(() -> {
+                if (!isAdded()) return;
+                if (scriptCountText != null) {
+                    scriptCountText.setText(String.valueOf(loadedScripts.size()));
+                }
                 updateScriptDropdown(loadedScripts, null);
             });
         });
     }
 
     private void handleImportFile(Uri uri) {
-        if (uri == null) return;
+        if (uri == null || !isAdded()) return;
         executor.execute(() -> {
-            try (InputStream input = getContentResolver().openInputStream(uri)) {
-                if (input == null) {
-                    return;
-                }
-                DocumentFile doc = DocumentFile.fromSingleUri(this, uri);
+            try (InputStream input = requireActivity().getContentResolver().openInputStream(uri)) {
+                if (input == null) return;
+                DocumentFile doc = DocumentFile.fromSingleUri(requireContext(), uri);
                 String name = doc != null ? doc.getName() : null;
                 if (name == null || name.trim().isEmpty()) {
                     name = "import_" + System.currentTimeMillis() + ".js";
@@ -122,14 +144,15 @@ public class ScriptCenterActivity extends AppCompatActivity {
                 scriptManager.loadScripts();
             } catch (Exception ignored) {
             }
-            runOnUiThread(this::refreshData);
+            requireActivity().runOnUiThread(this::refreshData);
         });
     }
 
     private String getSelectedScriptId() {
+        if (!isAdded() || scriptDropdown == null) return null;
         String scriptLabel = scriptDropdown.getText() == null ? "" : scriptDropdown.getText().toString();
         if (scriptLabel.isEmpty() || getString(R.string.no_scripts).equals(scriptLabel)) {
-            Toast.makeText(this, getString(R.string.prompt_import_first), Toast.LENGTH_SHORT).show();
+            Toast.makeText(requireContext(), getString(R.string.prompt_import_first), Toast.LENGTH_SHORT).show();
             return null;
         }
         for (ScriptOption option : scriptOptions) {
@@ -140,23 +163,59 @@ public class ScriptCenterActivity extends AppCompatActivity {
         return scriptLabel;
     }
 
-    private void showCloudRepoDialog() {
-        loadCloudRepo();
+    private void showImportUrlDialog() {
+        if (!isAdded()) return;
+        TextInputLayout inputLayout = new TextInputLayout(requireContext());
+        inputLayout.setBoxBackgroundMode(TextInputLayout.BOX_BACKGROUND_OUTLINE);
+        inputLayout.setPadding(32, 16, 32, 0);
+
+        TextInputEditText editText = new TextInputEditText(requireContext());
+        editText.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
+        editText.setHint(getString(R.string.import_script_url_placeholder));
+        inputLayout.addView(editText);
+        inputLayout.setHint(getString(R.string.import_script_hint));
+
+        new MaterialAlertDialogBuilder(requireContext())
+                .setTitle(getString(R.string.import_script_title))
+                .setView(inputLayout)
+                .setPositiveButton(getString(R.string.import_button), (dialog, which) -> {
+                    String url = editText.getText() == null ? "" : editText.getText().toString().trim();
+                    if (url.isEmpty()) return;
+                    scriptManager.importFromUrl(url, new ScriptManager.ImportCallback() {
+                        @Override
+                        public void onSuccess(java.io.File file) {
+                            scriptManager.loadScripts();
+                            if (isAdded()) {
+                                requireActivity().runOnUiThread(SourceFragment.this::refreshData);
+                            }
+                        }
+
+                        @Override
+                        public void onFailure(Exception e) {
+                            if (isAdded()) {
+                                requireActivity().runOnUiThread(SourceFragment.this::refreshData);
+                            }
+                        }
+                    });
+                })
+                .setNegativeButton(getString(R.string.cancel_button), null)
+                .show();
     }
 
     private void loadCloudRepo() {
-        Toast.makeText(this, getString(R.string.cloud_repo_loading), Toast.LENGTH_SHORT).show();
+        if (!isAdded()) return;
+        Toast.makeText(requireContext(), getString(R.string.cloud_repo_loading), Toast.LENGTH_SHORT).show();
         executor.execute(() -> {
             try {
                 ScriptManager.CloudRepoIndex index = scriptManager.fetchCloudRepoIndex(CLOUD_LIBRARY_URL);
                 List<ScriptManager.CloudScriptEntry> scripts = index == null ? null : index.getScripts();
                 if (scripts == null || scripts.isEmpty()) {
-                    runOnUiThread(() -> Toast.makeText(this, getString(R.string.cloud_repo_empty), Toast.LENGTH_SHORT).show());
+                    requireActivity().runOnUiThread(() -> Toast.makeText(requireContext(), getString(R.string.cloud_repo_empty), Toast.LENGTH_SHORT).show());
                     return;
                 }
-                runOnUiThread(() -> showCloudRepoPicker(index));
+                requireActivity().runOnUiThread(() -> showCloudRepoPicker(index));
             } catch (Exception e) {
-                runOnUiThread(() -> Toast.makeText(this,
+                requireActivity().runOnUiThread(() -> Toast.makeText(requireContext(),
                         getString(R.string.cloud_repo_load_failed, e.getMessage() == null ? "unknown" : e.getMessage()),
                         Toast.LENGTH_LONG).show());
             }
@@ -164,6 +223,7 @@ public class ScriptCenterActivity extends AppCompatActivity {
     }
 
     private void showCloudRepoPicker(ScriptManager.CloudRepoIndex index) {
+        if (!isAdded()) return;
         List<ScriptManager.CloudScriptEntry> scripts = index.getScripts();
         if (scripts == null || scripts.isEmpty()) return;
         String[] labels = new String[scripts.size()];
@@ -178,7 +238,7 @@ public class ScriptCenterActivity extends AppCompatActivity {
                 ? getString(R.string.cloud_repo_picker_title)
                 : getString(R.string.cloud_repo_picker_title_with_name, repoName);
 
-        new MaterialAlertDialogBuilder(this)
+        new MaterialAlertDialogBuilder(requireContext())
                 .setTitle(title)
                 .setItems(labels, (dialog, which) -> importCloudScript(scripts.get(which)))
                 .setNegativeButton(getString(R.string.cancel_button), null)
@@ -186,12 +246,12 @@ public class ScriptCenterActivity extends AppCompatActivity {
     }
 
     private void importCloudScript(ScriptManager.CloudScriptEntry entry) {
-        if (entry == null) return;
-        Toast.makeText(this, getString(R.string.cloud_repo_importing), Toast.LENGTH_SHORT).show();
+        if (entry == null || !isAdded()) return;
+        Toast.makeText(requireContext(), getString(R.string.cloud_repo_importing), Toast.LENGTH_SHORT).show();
         executor.execute(() -> {
             String importUrl = buildCloudImportUrl(entry);
             if (importUrl == null || importUrl.isEmpty()) {
-                runOnUiThread(() -> Toast.makeText(this,
+                requireActivity().runOnUiThread(() -> Toast.makeText(requireContext(),
                         getString(R.string.cloud_repo_load_failed, "invalid script url"),
                         Toast.LENGTH_LONG).show());
                 return;
@@ -203,18 +263,17 @@ public class ScriptCenterActivity extends AppCompatActivity {
                     importedScriptId = imported.getName();
                 }
             } catch (Exception e) {
-                final String error = e.getMessage() == null ? "unknown" : e.getMessage();
-                runOnUiThread(() -> Toast.makeText(this,
+                String error = e.getMessage() == null ? "unknown" : e.getMessage();
+                requireActivity().runOnUiThread(() -> Toast.makeText(requireContext(),
                         getString(R.string.cloud_repo_load_failed, error),
                         Toast.LENGTH_LONG).show());
                 return;
             }
-
             scriptManager.loadScripts();
             String testedScriptId = importedScriptId;
-            runOnUiThread(() -> {
+            requireActivity().runOnUiThread(() -> {
                 refreshData();
-                Toast.makeText(this, getString(R.string.script_op_success), Toast.LENGTH_SHORT).show();
+                Toast.makeText(requireContext(), getString(R.string.script_op_success), Toast.LENGTH_SHORT).show();
             });
             if (testedScriptId != null && !testedScriptId.trim().isEmpty()) {
                 runCloudInitTests(java.util.Collections.singletonList(testedScriptId));
@@ -226,23 +285,23 @@ public class ScriptCenterActivity extends AppCompatActivity {
         String scriptId = getSelectedScriptId();
         if (scriptId == null || scriptId.trim().isEmpty()) return;
         if (requestProxy == null) {
-            Toast.makeText(this, getString(R.string.script_test_failed, "RequestProxy unavailable"), Toast.LENGTH_SHORT).show();
+            Toast.makeText(requireContext(), getString(R.string.script_test_failed, "RequestProxy unavailable"), Toast.LENGTH_SHORT).show();
             return;
         }
-        Toast.makeText(this, getString(R.string.script_test_running), Toast.LENGTH_SHORT).show();
+        Toast.makeText(requireContext(), getString(R.string.script_test_running), Toast.LENGTH_SHORT).show();
         executor.execute(() -> {
             long start = SystemClock.elapsedRealtime();
             try {
                 ScriptInfo info = scriptManager.getScriptInfo(scriptId);
                 String source = pickQuickTestSource(info);
                 if (source == null) {
-                    runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title),
+                    requireActivity().runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title),
                             getString(R.string.script_test_unsupported_platform)));
                     return;
                 }
                 SearchService.SearchResult searchResult = searchService.search(source, DEFAULT_TEST_KEYWORD, 1, 1);
                 if (searchResult == null || searchResult.results == null || searchResult.results.isEmpty()) {
-                    runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title),
+                    requireActivity().runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title),
                             getString(R.string.script_test_failed, "search seed song failed")));
                     return;
                 }
@@ -261,15 +320,15 @@ public class ScriptCenterActivity extends AppCompatActivity {
                 String url = extractResolvedUrl(response);
                 long costMs = SystemClock.elapsedRealtime() - start;
                 if (url == null || url.isEmpty()) {
-                    runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title),
+                    requireActivity().runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title),
                             getString(R.string.script_test_failed, "no playable url")));
                     return;
                 }
                 String message = getString(R.string.script_test_success, source, costMs) + "\n" + url;
-                runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title), message));
+                requireActivity().runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title), message));
             } catch (Exception e) {
                 String message = e.getMessage() == null ? "unknown" : e.getMessage();
-                runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title),
+                requireActivity().runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title),
                         getString(R.string.script_test_failed, message)));
             }
         });
@@ -318,8 +377,7 @@ public class ScriptCenterActivity extends AppCompatActivity {
                 unavailable++;
                 continue;
             }
-            boolean ok = testScriptAvailability(scriptId.trim());
-            if (ok) {
+            if (testScriptAvailability(scriptId.trim())) {
                 available++;
             } else {
                 unavailable++;
@@ -327,7 +385,7 @@ public class ScriptCenterActivity extends AppCompatActivity {
         }
         int finalAvailable = available;
         int finalUnavailable = unavailable;
-        runOnUiThread(() -> showTestDialog(
+        requireActivity().runOnUiThread(() -> showTestDialog(
                 getString(R.string.script_test_result_title),
                 getString(R.string.cloud_test_finished, finalAvailable, finalUnavailable)
         ));
@@ -369,7 +427,7 @@ public class ScriptCenterActivity extends AppCompatActivity {
         if (info == null || info.getSources() == null || info.getSources().isEmpty()) {
             return null;
         }
-        String[] preferred = new String[] {"tx", "wy", "kg"};
+        String[] preferred = new String[]{"tx", "wy", "kg"};
         for (String source : preferred) {
             SourceInfo sourceInfo = info.getSources().get(source);
             if (sourceInfo == null) continue;
@@ -412,76 +470,43 @@ public class ScriptCenterActivity extends AppCompatActivity {
     }
 
     private void showTestDialog(String title, String message) {
-        new MaterialAlertDialogBuilder(this)
+        if (!isAdded()) return;
+        new MaterialAlertDialogBuilder(requireContext())
                 .setTitle(title)
                 .setMessage(message)
                 .setPositiveButton(getString(R.string.action_confirm), null)
                 .show();
     }
 
-    private void showImportUrlDialog() {
-        TextInputLayout inputLayout = new TextInputLayout(this);
-        inputLayout.setBoxBackgroundMode(TextInputLayout.BOX_BACKGROUND_OUTLINE);
-        inputLayout.setPadding(32, 16, 32, 0);
-
-        TextInputEditText editText = new TextInputEditText(this);
-        editText.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
-        editText.setHint(getString(R.string.import_script_url_placeholder));
-        inputLayout.addView(editText);
-        inputLayout.setHint(getString(R.string.import_script_hint));
-
-        new MaterialAlertDialogBuilder(this)
-                .setTitle(getString(R.string.import_script_title))
-                .setView(inputLayout)
-                .setPositiveButton(getString(R.string.import_button), (dialog, which) -> {
-                    String url = editText.getText() == null ? "" : editText.getText().toString().trim();
-                    if (url.isEmpty()) return;
-                    scriptManager.importFromUrl(url, new ScriptManager.ImportCallback() {
-                        @Override
-                        public void onSuccess(java.io.File file) {
-                            scriptManager.loadScripts();
-                            runOnUiThread(ScriptCenterActivity.this::refreshData);
-                        }
-
-                        @Override
-                        public void onFailure(Exception e) {
-                            runOnUiThread(ScriptCenterActivity.this::refreshData);
-                        }
-                    });
-                })
-                .setNegativeButton(getString(R.string.cancel_button), null)
-                .show();
-    }
-
     private void showRenameScriptDialog() {
         String scriptId = getSelectedScriptId();
-        if (scriptId == null) return;
-        TextInputLayout inputLayout = new TextInputLayout(this);
+        if (scriptId == null || !isAdded()) return;
+        TextInputLayout inputLayout = new TextInputLayout(requireContext());
         inputLayout.setBoxBackgroundMode(TextInputLayout.BOX_BACKGROUND_OUTLINE);
         inputLayout.setPadding(32, 16, 32, 0);
 
-        TextInputEditText editText = new TextInputEditText(this);
+        TextInputEditText editText = new TextInputEditText(requireContext());
         editText.setInputType(InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
         editText.setHint(getString(R.string.script_name_hint));
         editText.setText(scriptId);
         inputLayout.addView(editText);
 
-        new MaterialAlertDialogBuilder(this)
+        new MaterialAlertDialogBuilder(requireContext())
                 .setTitle(getString(R.string.script_rename_title))
                 .setView(inputLayout)
                 .setPositiveButton(getString(R.string.action_save), (dialog, which) -> {
                     String newName = editText.getText() == null ? "" : editText.getText().toString().trim();
                     executor.execute(() -> {
                         String renamed = scriptManager.renameScript(scriptId, newName);
-                        if (renamed != null) {
-                            scriptManager.loadScripts();
-                            runOnUiThread(() -> {
+                        requireActivity().runOnUiThread(() -> {
+                            if (renamed != null) {
+                                scriptManager.loadScripts();
                                 refreshData();
-                                Toast.makeText(this, getString(R.string.script_op_success), Toast.LENGTH_SHORT).show();
-                            });
-                        } else {
-                            runOnUiThread(() -> Toast.makeText(this, getString(R.string.script_op_failed), Toast.LENGTH_SHORT).show());
-                        }
+                                Toast.makeText(requireContext(), getString(R.string.script_op_success), Toast.LENGTH_SHORT).show();
+                            } else {
+                                Toast.makeText(requireContext(), getString(R.string.script_op_failed), Toast.LENGTH_SHORT).show();
+                            }
+                        });
                     });
                 })
                 .setNegativeButton(getString(R.string.cancel_button), null)
@@ -490,41 +515,42 @@ public class ScriptCenterActivity extends AppCompatActivity {
 
     private void showEditScriptDialog() {
         String scriptId = getSelectedScriptId();
-        if (scriptId == null) return;
+        if (scriptId == null || !isAdded()) return;
         executor.execute(() -> {
             String content = scriptManager.readScriptContent(scriptId);
-            runOnUiThread(() -> openEditDialog(scriptId, content));
+            requireActivity().runOnUiThread(() -> openEditDialog(scriptId, content));
         });
     }
 
     private void openEditDialog(String scriptId, String content) {
-        TextInputLayout inputLayout = new TextInputLayout(this);
+        if (!isAdded()) return;
+        TextInputLayout inputLayout = new TextInputLayout(requireContext());
         inputLayout.setBoxBackgroundMode(TextInputLayout.BOX_BACKGROUND_OUTLINE);
         inputLayout.setPadding(32, 16, 32, 0);
 
-        TextInputEditText editText = new TextInputEditText(this);
+        TextInputEditText editText = new TextInputEditText(requireContext());
         editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         editText.setMinLines(10);
         editText.setHint(getString(R.string.script_content_hint));
         editText.setText(content == null ? "" : content);
         inputLayout.addView(editText);
 
-        new MaterialAlertDialogBuilder(this)
+        new MaterialAlertDialogBuilder(requireContext())
                 .setTitle(getString(R.string.script_edit_title))
                 .setView(inputLayout)
                 .setPositiveButton(getString(R.string.action_save), (dialog, which) -> {
                     String newContent = editText.getText() == null ? "" : editText.getText().toString();
                     executor.execute(() -> {
                         boolean ok = scriptManager.updateScriptContent(scriptId, newContent);
-                        if (ok) {
-                            scriptManager.loadScripts();
-                            runOnUiThread(() -> {
+                        requireActivity().runOnUiThread(() -> {
+                            if (ok) {
+                                scriptManager.loadScripts();
                                 refreshData();
-                                Toast.makeText(this, getString(R.string.script_op_success), Toast.LENGTH_SHORT).show();
-                            });
-                        } else {
-                            runOnUiThread(() -> Toast.makeText(this, getString(R.string.script_op_failed), Toast.LENGTH_SHORT).show());
-                        }
+                                Toast.makeText(requireContext(), getString(R.string.script_op_success), Toast.LENGTH_SHORT).show();
+                            } else {
+                                Toast.makeText(requireContext(), getString(R.string.script_op_failed), Toast.LENGTH_SHORT).show();
+                            }
+                        });
                     });
                 })
                 .setNegativeButton(getString(R.string.cancel_button), null)
@@ -533,22 +559,22 @@ public class ScriptCenterActivity extends AppCompatActivity {
 
     private void confirmDeleteScript() {
         String scriptId = getSelectedScriptId();
-        if (scriptId == null) return;
-        new MaterialAlertDialogBuilder(this)
+        if (scriptId == null || !isAdded()) return;
+        new MaterialAlertDialogBuilder(requireContext())
                 .setTitle(getString(R.string.action_delete_script))
                 .setMessage(getString(R.string.script_delete_confirm, scriptId))
                 .setPositiveButton(getString(R.string.action_delete), (dialog, which) -> {
                     executor.execute(() -> {
                         boolean ok = scriptManager.deleteScript(scriptId);
-                        if (ok) {
-                            scriptManager.loadScripts();
-                            runOnUiThread(() -> {
+                        requireActivity().runOnUiThread(() -> {
+                            if (ok) {
+                                scriptManager.loadScripts();
                                 refreshData();
-                                Toast.makeText(this, getString(R.string.script_op_success), Toast.LENGTH_SHORT).show();
-                            });
-                        } else {
-                            runOnUiThread(() -> Toast.makeText(this, getString(R.string.script_op_failed), Toast.LENGTH_SHORT).show());
-                        }
+                                Toast.makeText(requireContext(), getString(R.string.script_op_success), Toast.LENGTH_SHORT).show();
+                            } else {
+                                Toast.makeText(requireContext(), getString(R.string.script_op_failed), Toast.LENGTH_SHORT).show();
+                            }
+                        });
                     });
                 })
                 .setNegativeButton(getString(R.string.cancel_button), null)
@@ -556,6 +582,7 @@ public class ScriptCenterActivity extends AppCompatActivity {
     }
 
     private void updateScriptDropdown(List<ScriptManager.ScriptEntry> scripts, String preferredScriptId) {
+        if (!isAdded() || scriptDropdown == null) return;
         scriptOptions.clear();
         if (scripts != null) {
             for (ScriptManager.ScriptEntry entry : scripts) {
@@ -568,7 +595,7 @@ public class ScriptCenterActivity extends AppCompatActivity {
         } else {
             applyDuplicateLabels();
         }
-        ArrayAdapter<String> scriptAdapter = new ArrayAdapter<>(this,
+        ArrayAdapter<String> scriptAdapter = new ArrayAdapter<>(requireContext(),
                 android.R.layout.simple_list_item_1,
                 mapScriptLabels());
         scriptDropdown.setAdapter(scriptAdapter);

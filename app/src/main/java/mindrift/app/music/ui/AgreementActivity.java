@@ -145,7 +145,7 @@ public class AgreementActivity extends AppCompatActivity {
     }
 
     private void openMain() {
-        startActivity(new Intent(this, MainActivity.class));
+        startActivity(new Intent(this, HomeContainerActivity.class));
         finish();
     }
 }

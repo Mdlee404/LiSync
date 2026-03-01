@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/dock_bar_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_dock_glass"
+    android:elevation="10dp"
+    android:orientation="horizontal"
+    android:paddingHorizontal="6dp"
+    android:paddingVertical="4dp">
+
+    <LinearLayout
+        android:id="@+id/dock_tab_home"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:background="@drawable/bg_dock_item"
+        android:gravity="center"
+        android:minHeight="62dp"
+        android:orientation="vertical"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="8dp">
+
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:src="@drawable/ic_dock_home"
+            android:tint="@color/dock_item_tint" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            android:text="@string/dock_home"
+            android:textColor="@color/dock_item_tint"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/dock_tab_source"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:background="@drawable/bg_dock_item"
+        android:gravity="center"
+        android:minHeight="62dp"
+        android:orientation="vertical"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="8dp">
+
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:src="@drawable/ic_dock_source"
+            android:tint="@color/dock_item_tint" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            android:text="@string/dock_source"
+            android:textColor="@color/dock_item_tint"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/dock_tab_settings"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:background="@drawable/bg_dock_item"
+        android:gravity="center"
+        android:minHeight="62dp"
+        android:orientation="vertical"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="8dp">
+
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:src="@drawable/ic_dock_settings"
+            android:tint="@color/dock_item_tint" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            android:text="@string/dock_settings"
+            android:textColor="@color/dock_item_tint"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/dock_tab_theme"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:background="@drawable/bg_dock_item"
+        android:gravity="center"
+        android:minHeight="62dp"
+        android:orientation="vertical"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="8dp">
+
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:src="@drawable/ic_dock_theme"
+            android:tint="@color/dock_item_tint" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            android:text="@string/dock_theme"
+            android:textColor="@color/dock_item_tint"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+</LinearLayout>

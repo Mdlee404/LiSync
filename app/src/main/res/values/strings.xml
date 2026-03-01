@@ -18,6 +18,8 @@
     <string name="section_shortcuts">快捷入口</string>
     <string name="section_tools">工具</string>
     <string name="section_manage">管理</string>
+    <string name="section_settings_tools">设置与工具</string>
+    <string name="section_settings_system">系统与通知</string>
     <string name="action_open_script_center">脚本管理</string>
     <string name="action_open_cache">缓存管理</string>
     <string name="action_open_logs">日志中心</string>
@@ -56,7 +58,11 @@
     <string name="action_rename_script">重命名</string>
     <string name="action_delete_script">删除</string>
     <string name="action_script_quick_test">源测试（快速）</string>
+    <string name="action_source_diagnostics">源请求诊断</string>
     <string name="action_upload_music">上传音乐文件</string>
+    <string name="action_open_notification_settings">通知设置</string>
+    <string name="settings_hint_tools">日志、诊断、缓存和搜索测试入口已统一收拢到这里。</string>
+    <string name="settings_hint_notifications">如果通知被系统关闭，会影响后台常驻和状态同步。</string>
 
     <string name="terminal_title">日志</string>
     <string name="action_copy_logs">复制</string>
@@ -216,6 +222,13 @@
     <string name="theme_transfer_switch_clean_desc">开始传输前删除旧主题目录。</string>
     <string name="theme_transfer_invalid_id">主题 ID 不合法: %1$s</string>
     <string name="theme_transfer_no_device">未连接设备，无法传输</string>
+
+    <string name="dock_home">主页</string>
+    <string name="dock_source">源管理</string>
+    <string name="dock_settings">设置</string>
+    <string name="dock_theme">主题</string>
+    <string name="home_status_label">运行状态</string>
+    <string name="home_connection_label">连接情况</string>
 
     <string name="action_music_url">播放链接 (musicUrl)</string>
     <string name="action_search">搜索 (search)</string>

@@ -3,12 +3,18 @@ package mindrift.app.music.ui;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.appcompat.app.AppCompatActivity;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.fragment.app.Fragment;
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.progressindicator.LinearProgressIndicator;
 import com.google.android.material.switchmaterial.SwitchMaterial;
 import com.google.android.material.textfield.TextInputEditText;
@@ -16,16 +22,16 @@ import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.Locale;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import mindrift.app.music.App;
 import mindrift.app.music.R;
 import mindrift.app.music.wearable.XiaomiWearableManager;
 
-public class ThemeTransferActivity extends AppCompatActivity {
+public class ThemeFragment extends Fragment {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private XiaomiWearableManager wearableManager;
     private ActivityResultLauncher<String[]> pickLauncher;
@@ -47,27 +53,36 @@ public class ThemeTransferActivity extends AppCompatActivity {
     private boolean transferInProgress = false;
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_theme_transfer);
+        pickLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), this::handlePickResult);
+    }
 
-        App app = (App) getApplication();
+    @Nullable
+    @Override
+    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
+        return inflater.inflate(R.layout.fragment_theme, container, false);
+    }
+
+    @Override
+    public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
+        super.onViewCreated(view, savedInstanceState);
+        App app = (App) requireActivity().getApplication();
         wearableManager = app.getWearableManager();
 
-        pathText = findViewById(R.id.text_theme_path);
-        nameText = findViewById(R.id.text_theme_name);
-        summaryText = findViewById(R.id.text_theme_summary);
-        statusText = findViewById(R.id.text_theme_status);
-        progressText = findViewById(R.id.text_theme_progress);
-        progressIndicator = findViewById(R.id.progress_theme_transfer);
-        themeIdInput = findViewById(R.id.input_theme_id);
-        openSwitch = findViewById(R.id.switch_theme_open);
-        cleanSwitch = findViewById(R.id.switch_theme_clean);
-        pickButton = findViewById(R.id.button_pick_theme);
-        startButton = findViewById(R.id.button_theme_start);
-        cancelButton = findViewById(R.id.button_theme_cancel);
+        pathText = view.findViewById(R.id.text_theme_path);
+        nameText = view.findViewById(R.id.text_theme_name);
+        summaryText = view.findViewById(R.id.text_theme_summary);
+        statusText = view.findViewById(R.id.text_theme_status);
+        progressText = view.findViewById(R.id.text_theme_progress);
+        progressIndicator = view.findViewById(R.id.progress_theme_transfer);
+        themeIdInput = view.findViewById(R.id.input_theme_id);
+        openSwitch = view.findViewById(R.id.switch_theme_open);
+        cleanSwitch = view.findViewById(R.id.switch_theme_clean);
+        pickButton = view.findViewById(R.id.button_pick_theme);
+        startButton = view.findViewById(R.id.button_theme_start);
+        cancelButton = view.findViewById(R.id.button_theme_cancel);
 
-        pickLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), this::handlePickResult);
         pickButton.setOnClickListener(v -> pickLauncher.launch(new String[]{
                 "application/zip",
                 "application/x-zip-compressed",
@@ -77,30 +92,46 @@ public class ThemeTransferActivity extends AppCompatActivity {
         startButton.setOnClickListener(v -> startTransfer());
         cancelButton.setOnClickListener(v -> cancelTransfer());
 
-        DockBarHelper.bind(this, DockBarHelper.TAB_THEME);
         updateTransferState(false);
         updateStatus(getString(R.string.theme_transfer_status_idle));
     }
 
     @Override
-    protected void onDestroy() {
+    public void onDestroyView() {
+        super.onDestroyView();
+        pathText = null;
+        nameText = null;
+        summaryText = null;
+        statusText = null;
+        progressText = null;
+        progressIndicator = null;
+        themeIdInput = null;
+        openSwitch = null;
+        cleanSwitch = null;
+        pickButton = null;
+        startButton = null;
+        cancelButton = null;
+    }
+
+    @Override
+    public void onDestroy() {
         super.onDestroy();
-        executor.shutdown();
+        executor.shutdownNow();
         if (!transferInProgress) {
             cleanupExtractedDir();
         }
     }
 
     private void handlePickResult(Uri uri) {
-        if (uri == null) return;
+        if (uri == null || !isAdded()) return;
         cleanupExtractedDir();
         try {
-            getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            requireContext().getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
         } catch (Exception ignored) {
         }
         String label = uri.toString();
         try {
-            androidx.documentfile.provider.DocumentFile doc = androidx.documentfile.provider.DocumentFile.fromSingleUri(this, uri);
+            androidx.documentfile.provider.DocumentFile doc = androidx.documentfile.provider.DocumentFile.fromSingleUri(requireContext(), uri);
             if (doc != null && doc.getName() != null) {
                 label = doc.getName();
             }
@@ -120,16 +151,20 @@ public class ThemeTransferActivity extends AppCompatActivity {
             try {
                 File rootDir = extractZipToPrivate(uri);
                 XiaomiWearableManager.ThemeInfo info = wearableManager.inspectTheme(rootDir);
-                runOnUiThread(() -> {
-                    if (rootDir != null) {
+                if (!isAdded()) return;
+                requireActivity().runOnUiThread(() -> {
+                    if (!isAdded()) return;
+                    if (rootDir != null && pathText != null) {
                         pathText.setText(currentZipLabel == null ? rootDir.getName() : currentZipLabel);
                     }
                     applyThemeInfo(info);
                 });
             } catch (XiaomiWearableManager.ThemeTransferException e) {
-                runOnUiThread(() -> showError(getString(R.string.theme_transfer_status_failed, e.getMessage())));
+                if (!isAdded()) return;
+                requireActivity().runOnUiThread(() -> showError(getString(R.string.theme_transfer_status_failed, e.getMessage())));
             } catch (Exception e) {
-                runOnUiThread(() -> showError(getString(R.string.theme_transfer_status_failed, e.getMessage())));
+                if (!isAdded()) return;
+                requireActivity().runOnUiThread(() -> showError(getString(R.string.theme_transfer_status_failed, e.getMessage())));
             }
         });
     }
@@ -160,9 +195,9 @@ public class ThemeTransferActivity extends AppCompatActivity {
     }
 
     private void startTransfer() {
-        if (transferInProgress) return;
+        if (!isAdded() || transferInProgress) return;
         if (currentThemeInfo == null) {
-            Toast.makeText(this, getString(R.string.theme_transfer_summary_placeholder), Toast.LENGTH_SHORT).show();
+            Toast.makeText(requireContext(), getString(R.string.theme_transfer_summary_placeholder), Toast.LENGTH_SHORT).show();
             return;
         }
         String themeId = themeIdInput.getText() == null ? "" : themeIdInput.getText().toString().trim();
@@ -175,7 +210,7 @@ public class ThemeTransferActivity extends AppCompatActivity {
             return;
         }
         if (wearableManager == null || !wearableManager.isServiceConnected() || wearableManager.getCurrentNodeId() == null) {
-            Toast.makeText(this, getString(R.string.theme_transfer_no_device), Toast.LENGTH_SHORT).show();
+            Toast.makeText(requireContext(), getString(R.string.theme_transfer_no_device), Toast.LENGTH_SHORT).show();
             return;
         }
         transferInProgress = true;
@@ -192,12 +227,14 @@ public class ThemeTransferActivity extends AppCompatActivity {
         wearableManager.transferTheme(currentThemeInfo, options, new XiaomiWearableManager.ThemeTransferCallback() {
             @Override
             public void onStatus(String message) {
-                runOnUiThread(() -> updateStatus(message));
+                if (!isAdded()) return;
+                requireActivity().runOnUiThread(() -> updateStatus(message));
             }
 
             @Override
             public void onProgress(int percent, int filesSent, int totalFiles) {
-                runOnUiThread(() -> {
+                if (!isAdded()) return;
+                requireActivity().runOnUiThread(() -> {
                     progressIndicator.setProgressCompat(percent, true);
                     progressText.setText(getString(R.string.theme_transfer_progress_format, percent, filesSent, totalFiles));
                 });
@@ -205,14 +242,15 @@ public class ThemeTransferActivity extends AppCompatActivity {
 
             @Override
             public void onSuccess(String themeId) {
-                runOnUiThread(() -> {
+                if (!isAdded()) return;
+                requireActivity().runOnUiThread(() -> {
                     transferInProgress = false;
                     progressIndicator.setProgressCompat(100, true);
                     updateStatus(getString(R.string.theme_transfer_status_finished));
                     updateTransferState(false);
                     cleanupExtractedDir();
-                    Toast.makeText(ThemeTransferActivity.this, getString(R.string.theme_transfer_status_finished), Toast.LENGTH_SHORT).show();
-                    new com.google.android.material.dialog.MaterialAlertDialogBuilder(ThemeTransferActivity.this)
+                    Toast.makeText(requireContext(), getString(R.string.theme_transfer_status_finished), Toast.LENGTH_SHORT).show();
+                    new MaterialAlertDialogBuilder(requireContext())
                             .setTitle(getString(R.string.dialog_common_title))
                             .setMessage(getString(R.string.theme_transfer_restart_prompt))
                             .setPositiveButton(getString(R.string.action_confirm), null)
@@ -223,7 +261,8 @@ public class ThemeTransferActivity extends AppCompatActivity {
 
             @Override
             public void onFailure(String message) {
-                runOnUiThread(() -> {
+                if (!isAdded()) return;
+                requireActivity().runOnUiThread(() -> {
                     transferInProgress = false;
                     String reason = message == null ? "" : message;
                     if (reason.contains("取消")) {
@@ -233,7 +272,7 @@ public class ThemeTransferActivity extends AppCompatActivity {
                     }
                     updateTransferState(false);
                     cleanupExtractedDir();
-                    Toast.makeText(ThemeTransferActivity.this,
+                    Toast.makeText(requireContext(),
                             reason.contains("取消")
                                     ? getString(R.string.theme_transfer_status_cancelled)
                                     : getString(R.string.theme_transfer_status_failed, reason),
@@ -244,26 +283,29 @@ public class ThemeTransferActivity extends AppCompatActivity {
     }
 
     private void cancelTransfer() {
-        if (!transferInProgress) return;
+        if (!transferInProgress || !isAdded()) return;
         updateStatus(getString(R.string.theme_transfer_status_cancelled));
         wearableManager.cancelThemeTransfer(cleanSwitch.isChecked());
     }
 
     private void updateStatus(String message) {
-        statusText.setText(message == null ? "" : message);
+        if (statusText != null) {
+            statusText.setText(message == null ? "" : message);
+        }
     }
 
     private void updateTransferState(boolean inProgress) {
-        pickButton.setEnabled(!inProgress);
-        startButton.setEnabled(!inProgress && currentThemeInfo != null);
-        cancelButton.setEnabled(inProgress);
+        if (pickButton != null) pickButton.setEnabled(!inProgress);
+        if (startButton != null) startButton.setEnabled(!inProgress && currentThemeInfo != null);
+        if (cancelButton != null) cancelButton.setEnabled(inProgress);
     }
 
     private void showError(String message) {
+        if (!isAdded()) return;
         String text = message == null ? getString(R.string.theme_transfer_status_failed, "") : message;
         transferInProgress = false;
         updateStatus(text);
-        Toast.makeText(this, text, Toast.LENGTH_LONG).show();
+        Toast.makeText(requireContext(), text, Toast.LENGTH_LONG).show();
         updateTransferState(false);
     }
 
@@ -276,14 +318,14 @@ public class ThemeTransferActivity extends AppCompatActivity {
             value /= 1024.0;
             index++;
         }
-        return String.format(java.util.Locale.US, "%.1f %s", value, units[index]);
+        return String.format(Locale.US, "%.1f %s", value, units[index]);
     }
 
     private File extractZipToPrivate(Uri uri) throws Exception {
-        if (uri == null) {
+        if (uri == null || !isAdded()) {
             throw new Exception(getString(R.string.theme_transfer_zip_missing));
         }
-        File baseDir = new File(getFilesDir(), "theme_imports");
+        File baseDir = new File(requireContext().getFilesDir(), "theme_imports");
         if (!baseDir.exists() && !baseDir.mkdirs()) {
             throw new Exception(getString(R.string.theme_transfer_extract_failed, "create dir failed"));
         }
@@ -291,7 +333,7 @@ public class ThemeTransferActivity extends AppCompatActivity {
         if (!workDir.mkdirs()) {
             throw new Exception(getString(R.string.theme_transfer_extract_failed, "create dir failed"));
         }
-        try (InputStream input = getContentResolver().openInputStream(uri)) {
+        try (InputStream input = requireContext().getContentResolver().openInputStream(uri)) {
             if (input == null) {
                 throw new Exception(getString(R.string.theme_transfer_extract_failed, "open zip failed"));
             }

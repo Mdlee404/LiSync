@@ -73,7 +73,6 @@ public class MainActivity extends AppCompatActivity {
         MaterialButton clearCacheButton = findViewById(R.id.button_clear_cache);
         MaterialButton openThemeTransferButton = findViewById(R.id.button_open_theme_transfer_home);
         MaterialButton openScriptCenterButton = findViewById(R.id.button_open_script_center);
-        MaterialButton openToolsButton = findViewById(R.id.button_open_tools);
 
         refreshButton.setOnClickListener(v -> {
             requestWearableRefresh();
@@ -86,7 +85,6 @@ public class MainActivity extends AppCompatActivity {
         uploadLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), this::handleUploadFile);
         openThemeTransferButton.setOnClickListener(v -> startActivity(new Intent(this, ThemeTransferActivity.class)));
         openScriptCenterButton.setOnClickListener(v -> startActivity(new Intent(this, ScriptCenterActivity.class)));
-        openToolsButton.setOnClickListener(v -> startActivity(new Intent(this, ToolsActivity.class)));
 
         refreshData();
         handleUploadFromIntent(getIntent());

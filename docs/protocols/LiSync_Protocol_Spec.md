@@ -65,6 +65,42 @@
 
 ---
 
+### 2.0.1 版本检查 (Version Check)
+手表端可主动请求 `version.check`，由手机端统一返回手机/手表版本与更新说明。
+
+#### 请求 (Watch -> Phone)
+```json
+{
+  "action": "version.check",
+  "_requestId": "req_17273849123_9",
+  "version": "1.5"
+}
+```
+
+`version` 可选，也兼容 `watchVersion` 或 `watch.version`。
+
+#### 响应 (Phone -> Watch)
+```json
+{
+  "action": "version.check.result",
+  "code": 0,
+  "_requestId": "req_17273849123_9",
+  "data": {
+    "watch": {
+      "version": "1.5",
+      "update_notes": ["..."]
+    },
+    "phone": {
+      "version": "1.0.0",
+      "update_notes": ["..."],
+      "download_url": "https://..."
+    }
+  }
+}
+```
+
+---
+
 ### 2.1 获取平台能力 (Capabilities)
 快应用启动时会调用此接口，查询 Android 端支持的音乐平台和音质。
 

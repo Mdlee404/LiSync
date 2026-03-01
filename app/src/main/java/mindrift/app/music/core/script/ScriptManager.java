@@ -627,6 +627,7 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
             JsonArray scripts = getJsonArray(obj, "scripts");
             if (scripts == null) scripts = getJsonArray(obj, "items");
             if (scripts == null) scripts = getJsonArray(obj, "list");
+            if (scripts == null) scripts = getJsonArray(obj, "sources");
             addCloudEntries(entries, scripts, indexUrl);
         } else if (root != null && root.isJsonArray()) {
             addCloudEntries(entries, root.getAsJsonArray(), indexUrl);
@@ -664,11 +665,15 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
         if (!element.isJsonObject()) return null;
         JsonObject obj = element.getAsJsonObject();
         String url = firstNonEmpty(
+                getJsonString(obj, "updateUrl"),
                 getJsonString(obj, "url"),
                 getJsonString(obj, "scriptUrl"),
                 getJsonString(obj, "downloadUrl"),
                 getJsonString(obj, "raw")
         );
+        if (url != null && !url.isEmpty() && !isHttpUrl(url)) {
+            url = toAbsoluteUrl(indexUrl, url);
+        }
         String name = firstNonEmpty(
                 getJsonString(obj, "name"),
                 getJsonString(obj, "fileName"),

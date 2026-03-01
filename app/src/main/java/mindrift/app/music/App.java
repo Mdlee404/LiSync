@@ -17,6 +17,7 @@ import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
@@ -57,6 +58,10 @@ public class App extends Application {
     private static final String KEY_LAST_SHOWN_VERSION = "last_shown_version";
     private static final String KEY_LAST_SHOWN_LOCAL_VERSION = "last_shown_local_version";
     private static final Pattern VERSION_NUMBER_PATTERN = Pattern.compile("\\d+");
+    private static final long UPDATE_INFO_CACHE_MS = 60_000L;
+    private final Object updateInfoLock = new Object();
+    private AppUpdateInfo latestRemoteUpdateInfo;
+    private long latestRemoteUpdateAt = 0L;
 
     @Override
     public void onCreate() {
@@ -254,20 +259,8 @@ public class App extends Application {
 
     private void checkAppUpdateInternal() {
         try {
-            HashMap<String, Object> options = new HashMap<>();
-            options.put("method", "GET");
-            HttpClient.ResponseData response = updateHttpClient.requestSync(
-                    UPDATE_MANIFEST_URL,
-                    options
-            );
-            if (response == null || response.code != 200) {
-                Logger.warn("Update check failed: http=" + (response == null ? "null" : response.code));
-                return;
-            }
-            AppUpdateInfo info = parseUpdateInfo(response.body);
-            if (info == null) {
-                return;
-            }
+            AppUpdateInfo info = fetchUpdateInfo(false);
+            if (info == null) return;
             String localVersion = getLocalVersionName();
             boolean showCurrentVersionNotes = shouldShowCurrentVersionNotes(localVersion);
             boolean androidUpdate = hasAndroidUpdate(info);
@@ -294,6 +287,76 @@ public class App extends Application {
             });
         } catch (Exception e) {
             Logger.warn("Update check failed: " + e.getMessage());
+        }
+    }
+
+    public Map<String, Object> buildVersionCheckData() {
+        AppUpdateInfo info = fetchUpdateInfo(true);
+        String localVersion = getLocalVersionName();
+
+        String phoneVersion = trimToEmpty(info == null ? null : info.androidVersion);
+        if (phoneVersion.isEmpty()) {
+            phoneVersion = trimToEmpty(localVersion);
+        }
+
+        Map<String, Object> watch = new HashMap<>();
+        watch.put("version", trimToEmpty(info == null ? null : info.watchVersion));
+        watch.put("update_notes", copyNotes(info == null ? null : info.watchUpdateNotes));
+
+        Map<String, Object> phone = new HashMap<>();
+        phone.put("version", phoneVersion);
+        phone.put("update_notes", copyNotes(info == null ? null : info.phoneUpdateNotes));
+        String downloadUrl = trimToEmpty(info == null ? null : info.phoneDownloadUrl);
+        if (!downloadUrl.isEmpty()) {
+            phone.put("download_url", downloadUrl);
+        }
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("watch", watch);
+        data.put("phone", phone);
+        return data;
+    }
+
+    private AppUpdateInfo fetchUpdateInfo(boolean allowCache) {
+        long now = System.currentTimeMillis();
+        if (allowCache) {
+            synchronized (updateInfoLock) {
+                if (latestRemoteUpdateInfo != null && now - latestRemoteUpdateAt <= UPDATE_INFO_CACHE_MS) {
+                    return copyUpdateInfo(latestRemoteUpdateInfo);
+                }
+            }
+        }
+
+        AppUpdateInfo fresh = requestRemoteUpdateInfo();
+        if (fresh != null) {
+            synchronized (updateInfoLock) {
+                latestRemoteUpdateInfo = copyUpdateInfo(fresh);
+                latestRemoteUpdateAt = now;
+            }
+            return fresh;
+        }
+
+        synchronized (updateInfoLock) {
+            return copyUpdateInfo(latestRemoteUpdateInfo);
+        }
+    }
+
+    private AppUpdateInfo requestRemoteUpdateInfo() {
+        try {
+            HashMap<String, Object> options = new HashMap<>();
+            options.put("method", "GET");
+            HttpClient.ResponseData response = updateHttpClient.requestSync(
+                    UPDATE_MANIFEST_URL,
+                    options
+            );
+            if (response == null || response.code != 200) {
+                Logger.warn("Update check failed: http=" + (response == null ? "null" : response.code));
+                return null;
+            }
+            return parseUpdateInfo(response.body);
+        } catch (Exception e) {
+            Logger.warn("Update check failed: " + e.getMessage());
+            return null;
         }
     }
 
@@ -517,6 +580,32 @@ public class App extends Application {
             }
         }
         return result;
+    }
+
+    private List<String> copyNotes(List<String> notes) {
+        if (notes == null || notes.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return new ArrayList<>(notes);
+    }
+
+    private String trimToEmpty(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private AppUpdateInfo copyUpdateInfo(AppUpdateInfo source) {
+        if (source == null) return null;
+        AppUpdateInfo target = new AppUpdateInfo();
+        target.watchVersion = source.watchVersion;
+        target.androidVersion = source.androidVersion;
+        target.watchUpdateNotes = copyNotes(source.watchUpdateNotes);
+        target.phoneUpdateNotes = copyNotes(source.phoneUpdateNotes);
+        target.phoneDownloadUrl = source.phoneDownloadUrl;
+        target.showCurrentVersionNotes = source.showCurrentVersionNotes;
+        target.androidUpdateAvailable = source.androidUpdateAvailable;
+        target.forceUpdateRequired = source.forceUpdateRequired;
+        target.localVersionAtCheck = source.localVersionAtCheck;
+        return target;
     }
 
     private void appendUpdateNotes(StringBuilder builder, List<String> notes) {
