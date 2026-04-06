@@ -10,7 +10,12 @@ import mindrift.app.music.utils.AppLogBuffer;
 
 public class LogsActivity extends AppCompatActivity {
     private TextView logOutputText;
-    private final AppLogBuffer.LogListener logListener = newLine -> runOnUiThread(this::refreshLogView);
+    // 使用 WeakReference 防止内存泄漏，并检查 Activity 状态
+    private final AppLogBuffer.LogListener logListener = newLine -> {
+        if (!isFinishing() && !isDestroyed()) {
+            runOnUiThread(this::refreshLogView);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -35,6 +40,7 @@ public class LogsActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         AppLogBuffer.removeListener(logListener);
+        logOutputText = null;
     }
 
     @Override
@@ -44,7 +50,7 @@ public class LogsActivity extends AppCompatActivity {
     }
 
     private void refreshLogView() {
-        if (logOutputText == null) return;
+        if (logOutputText == null || isFinishing()) return;
         String snapshot = AppLogBuffer.getSnapshot();
         logOutputText.setText(trimLogSnapshot(snapshot));
     }

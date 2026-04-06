@@ -152,10 +152,28 @@ public class ScriptContext {
                 });
             } catch (RejectedExecutionException e) {
                 Logger.warn("Script context rejected close task: " + scriptId);
+                // 如果任务被拒绝，直接销毁 jsContext
+                if (jsContext != null) {
+                    try {
+                        jsContext.destroy();
+                    } catch (Exception ex) {
+                        Logger.warn("Force destroy jsContext failed: " + ex.getMessage());
+                    }
+                    jsContext = null;
+                }
             }
         }
         asyncResults.clear();
         executor.shutdown();
+        // 等待任务完成，最多等待 5 秒
+        try {
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     public void completeAsyncResult(String asyncId, String payloadJson) {

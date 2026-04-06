@@ -334,7 +334,8 @@ public class MainActivity extends AppCompatActivity {
         intent.removeExtra(EXTRA_UPLOAD_URI);
         try {
             handleUploadFile(Uri.parse(uriValue));
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            mindrift.app.music.utils.Logger.warn("Handle upload intent failed: " + e.getMessage());
         }
     }
 

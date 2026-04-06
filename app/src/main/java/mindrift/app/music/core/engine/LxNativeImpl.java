@@ -364,8 +364,8 @@ public class LxNativeImpl implements LxNativeInterface {
     @JavascriptInterface
     public String zlibInflate(String base64) {
         byte[] input = decodeBase64(base64);
+        Inflater inflater = new Inflater();
         try {
-            Inflater inflater = new Inflater();
             inflater.setInput(input);
             byte[] buffer = new byte[1024];
             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
@@ -376,19 +376,20 @@ public class LxNativeImpl implements LxNativeInterface {
                 }
                 out.write(buffer, 0, count);
             }
-            inflater.end();
             return encodeBase64(out.toByteArray());
         } catch (Exception e) {
             Logger.error("zlib inflate error", e);
             return "";
+        } finally {
+            inflater.end();
         }
     }
 
     @JavascriptInterface
     public String zlibDeflate(String base64) {
         byte[] input = decodeBase64(base64);
+        Deflater deflater = new Deflater();
         try {
-            Deflater deflater = new Deflater();
             deflater.setInput(input);
             deflater.finish();
             byte[] buffer = new byte[1024];
@@ -397,11 +398,12 @@ public class LxNativeImpl implements LxNativeInterface {
                 int count = deflater.deflate(buffer);
                 out.write(buffer, 0, count);
             }
-            deflater.end();
             return encodeBase64(out.toByteArray());
         } catch (Exception e) {
             Logger.error("zlib deflate error", e);
             return "";
+        } finally {
+            deflater.end();
         }
     }
 

@@ -95,10 +95,10 @@ public class CacheManager {
             String json = new String(data, 0, read, StandardCharsets.UTF_8);
             Type type = new TypeToken<List<CacheEntry>>() {}.getType();
             List<CacheEntry> list = gson.fromJson(json, type);
-            if (list == null) return;
+            if (list == null || list.isEmpty()) return;
             long now = System.currentTimeMillis();
             for (CacheEntry entry : list) {
-                if (entry.getExpireAt() > now) {
+                if (entry != null && entry.getExpireAt() > now) {
                     cache.put(entry.getKey(), entry);
                 }
             }

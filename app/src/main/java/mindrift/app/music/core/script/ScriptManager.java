@@ -438,7 +438,7 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
         }
         Map<String, Object> request = gson.fromJson(requestJson, Map.class);
         if (request == null) request = new HashMap<>();
-        String requestKey = "request__" + System.currentTimeMillis() + "_" + Math.abs(new java.util.Random().nextInt());
+        String requestKey = "request__" + System.currentTimeMillis() + "_" + Math.abs(new java.util.Random().nextInt(Integer.MAX_VALUE));
         Map<String, Object> payload = new HashMap<>();
         payload.put("requestKey", requestKey);
         payload.put("data", request);
@@ -522,7 +522,7 @@ public class ScriptManager implements LxNativeImpl.ScriptEventListener {
         String scriptContent = readFile(file);
         if (scriptContent == null) return;
 
-        String nativeKey = "key_" + System.currentTimeMillis() + "_" + Math.abs(new java.util.Random().nextInt());
+        String nativeKey = "key_" + System.currentTimeMillis() + "_" + Math.abs(new java.util.Random().nextInt(Integer.MAX_VALUE));
         ScriptContext context = new ScriptContext(scriptId, nativeKey);
         LxNativeImpl nativeImpl = new LxNativeImpl(context, scriptId, this);
 

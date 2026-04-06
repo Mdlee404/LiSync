@@ -6,11 +6,14 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 import mindrift.app.music.core.network.HttpClient;
 import mindrift.app.music.utils.Logger;
 import mindrift.app.music.utils.PlatformUtils;
@@ -21,12 +24,10 @@ public class SearchService {
     private static final int MAX_CACHE_SIZE = 100;
     private final HttpClient httpClient = new HttpClient();
     private final Gson gson = new Gson();
-    private final Map<String, CacheEntry<SearchResult>> cache = new LinkedHashMap<String, CacheEntry<SearchResult>>(16, 0.75f, true) {
-        @Override
-        protected boolean removeEldestEntry(Map.Entry<String, CacheEntry<SearchResult>> eldest) {
-            return size() > MAX_CACHE_SIZE;
-        }
-    };
+    // 使用 ConcurrentHashMap + LRU 访问顺序追踪
+    private final ConcurrentHashMap<String, CacheEntry<SearchResult>> cache = new ConcurrentHashMap<>();
+    private final List<String> accessOrder = new ArrayList<>();
+    private final ReentrantLock cacheLock = new ReentrantLock();
 
     public SearchResult search(String platform, String keyword, int page, Integer pageSize) {
         String normalizedPlatform = PlatformUtils.normalize(platform);
@@ -45,7 +46,7 @@ public class SearchService {
 
             SearchResult result = searchByPlatform(source, kw, safePage, size);
             if (result != null && !result.results.isEmpty()) {
-                cache.put(cacheKey, new CacheEntry<>(result));
+                putCached(cacheKey, new CacheEntry<>(result));
                 return result;
             }
         }
@@ -68,9 +69,47 @@ public class SearchService {
         if (entry == null) return null;
         if (System.currentTimeMillis() - entry.timestamp > CACHE_EXPIRY_MS) {
             cache.remove(key);
+            removeAccessOrder(key);
             return null;
         }
+        // 更新访问顺序
+        updateAccessOrder(key);
         return entry.value;
+    }
+
+    private void putCached(String key, CacheEntry<SearchResult> entry) {
+        cache.put(key, entry);
+        cacheLock.lock();
+        try {
+            accessOrder.remove(key);
+            accessOrder.add(key);
+            // LRU 淘汰：严格限制缓存大小
+            while (accessOrder.size() > MAX_CACHE_SIZE) {
+                String oldest = accessOrder.remove(0);
+                cache.remove(oldest);
+            }
+        } finally {
+            cacheLock.unlock();
+        }
+    }
+
+    private void updateAccessOrder(String key) {
+        cacheLock.lock();
+        try {
+            accessOrder.remove(key);
+            accessOrder.add(key);
+        } finally {
+            cacheLock.unlock();
+        }
+    }
+
+    private void removeAccessOrder(String key) {
+        cacheLock.lock();
+        try {
+            accessOrder.remove(key);
+        } finally {
+            cacheLock.unlock();
+        }
     }
 
     private SearchResult searchByPlatform(String platform, String keyword, int page, int pageSize) {

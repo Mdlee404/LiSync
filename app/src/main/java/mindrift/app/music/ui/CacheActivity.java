@@ -4,9 +4,11 @@ import android.os.Bundle;
 import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
 import com.google.android.material.button.MaterialButton;
+import com.google.gson.Gson;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import mindrift.app.music.App;
 import mindrift.app.music.R;
 import mindrift.app.music.core.cache.CacheEntry;
@@ -14,6 +16,7 @@ import mindrift.app.music.core.cache.CacheManager;
 
 public class CacheActivity extends AppCompatActivity {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final Gson gson = new Gson();  // 使用共享 Gson 实例，避免每次创建
     private CacheManager cacheManager;
     private TextView cacheSummaryText;
     private TextView cacheListText;
@@ -44,6 +47,15 @@ public class CacheActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         executor.shutdown();
+        // 等待任务完成，最多等待 2 秒
+        try {
+            if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Override
@@ -76,7 +88,7 @@ public class CacheActivity extends AppCompatActivity {
             builder.append('[').append(index++).append("] ").append(entry.getKey()).append('\n');
             builder.append(getString(R.string.cache_provider_format, safe(entry.getProvider()))).append('\n');
             builder.append(getString(R.string.cache_ttl_format, formatTtl(ttlSeconds))).append('\n');
-            String dataJson = new com.google.gson.Gson().toJson(entry.getData());
+            String dataJson = gson.toJson(entry.getData());
             builder.append(getString(R.string.cache_data_format, trim(dataJson))).append("\n\n");
         }
         return builder.toString().trim();

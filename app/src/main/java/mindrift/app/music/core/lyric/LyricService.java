@@ -9,8 +9,11 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 import mindrift.app.music.core.network.HttpClient;
 import mindrift.app.music.utils.Logger;
 import mindrift.app.music.utils.PlatformUtils;
@@ -20,12 +23,10 @@ public class LyricService {
     private static final int MAX_CACHE_SIZE = 100;
     private final HttpClient httpClient = new HttpClient();
     private final Gson gson = new Gson();
-    private final Map<String, CacheEntry<LyricResult>> cache = new LinkedHashMap<String, CacheEntry<LyricResult>>(16, 0.75f, true) {
-        @Override
-        protected boolean removeEldestEntry(Map.Entry<String, CacheEntry<LyricResult>> eldest) {
-            return size() > MAX_CACHE_SIZE;
-        }
-    };
+    // 使用 ConcurrentHashMap + LRU 访问顺序追踪
+    private final ConcurrentHashMap<String, CacheEntry<LyricResult>> cache = new ConcurrentHashMap<>();
+    private final List<String> accessOrder = new ArrayList<>();
+    private final ReentrantLock cacheLock = new ReentrantLock();
 
     public LyricResult getLyric(String platform, String id) {
         String normalizedPlatform = PlatformUtils.normalize(platform);
@@ -46,7 +47,7 @@ public class LyricService {
         } else {
             result = empty();
         }
-        cache.put(key, new CacheEntry<>(result));
+        putCached(key, new CacheEntry<>(result));
         return result;
     }
 
@@ -54,8 +55,8 @@ public class LyricService {
         try {
             String url = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid="
                     + urlEncode(id) + "&format=json&nobase64=1";
-            Map<String, Object> options = new LinkedHashMap<>();
-            Map<String, String> headers = new LinkedHashMap<>();
+            Map<String, Object> options = new java.util.LinkedHashMap<>();
+            Map<String, String> headers = new java.util.LinkedHashMap<>();
             headers.put("Referer", "https://y.qq.com/portal/player.html");
             headers.put("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
             options.put("headers", headers);
@@ -73,8 +74,9 @@ public class LyricService {
 
     private LyricResult fetchNetease(String id) {
         try {
-            String url = "http://iwenwiki.com:3000/lyric?id=" + urlEncode(id);
-            HttpClient.ResponseData resp = httpClient.requestSync(url, new LinkedHashMap<>());
+            // 使用 HTTPS 替代不安全的 HTTP
+            String url = "https://iwenwiki.com:3000/lyric?id=" + urlEncode(id);
+            HttpClient.ResponseData resp = httpClient.requestSync(url, new java.util.LinkedHashMap<>());
             JsonObject root = parseJson(resp.body);
             JsonObject lrc = getObject(root, "lrc");
             JsonObject tlrc = getObject(root, "tlyric");
@@ -90,9 +92,10 @@ public class LyricService {
 
     private LyricResult fetchKugou(String id) {
         try {
-            String searchUrl = "http://krcs.kugou.com/search?ver=1&man=yes&client=mobi&keyword=&duration=&hash="
+            // 使用 HTTPS 替代不安全的 HTTP
+            String searchUrl = "https://krcs.kugou.com/search?ver=1&man=yes&client=mobi&keyword=&duration=&hash="
                     + urlEncode(id) + "&album_audio_id=";
-            HttpClient.ResponseData searchResp = httpClient.requestSync(searchUrl, new LinkedHashMap<>());
+            HttpClient.ResponseData searchResp = httpClient.requestSync(searchUrl, new java.util.LinkedHashMap<>());
             JsonObject searchRoot = parseJson(searchResp.body);
             JsonArray candidates = searchRoot.getAsJsonArray("candidates");
             if (candidates == null || candidates.size() == 0) return empty();
@@ -101,9 +104,9 @@ public class LyricService {
             String accessKey = getString(candidate, "accesskey");
             if (lyricId == null || accessKey == null) return empty();
 
-            String downloadUrl = "http://lyrics.kugou.com/download?ver=1&client=pc&id="
+            String downloadUrl = "https://lyrics.kugou.com/download?ver=1&client=pc&id="
                     + urlEncode(lyricId) + "&accesskey=" + urlEncode(accessKey) + "&fmt=lrc&charset=utf8";
-            HttpClient.ResponseData downloadResp = httpClient.requestSync(downloadUrl, new LinkedHashMap<>());
+            HttpClient.ResponseData downloadResp = httpClient.requestSync(downloadUrl, new java.util.LinkedHashMap<>());
             JsonObject downloadRoot = parseJson(downloadResp.body);
             String content = getString(downloadRoot, "content");
             if (content == null || content.isEmpty()) return empty();
@@ -124,9 +127,47 @@ public class LyricService {
         if (entry == null) return null;
         if (System.currentTimeMillis() - entry.timestamp > CACHE_EXPIRY_MS) {
             cache.remove(key);
+            removeAccessOrder(key);
             return null;
         }
+        // 更新访问顺序
+        updateAccessOrder(key);
         return entry.value;
+    }
+
+    private void putCached(String key, CacheEntry<LyricResult> entry) {
+        cache.put(key, entry);
+        cacheLock.lock();
+        try {
+            accessOrder.remove(key);
+            accessOrder.add(key);
+            // LRU 淘汰：严格限制缓存大小
+            while (accessOrder.size() > MAX_CACHE_SIZE) {
+                String oldest = accessOrder.remove(0);
+                cache.remove(oldest);
+            }
+        } finally {
+            cacheLock.unlock();
+        }
+    }
+
+    private void updateAccessOrder(String key) {
+        cacheLock.lock();
+        try {
+            accessOrder.remove(key);
+            accessOrder.add(key);
+        } finally {
+            cacheLock.unlock();
+        }
+    }
+
+    private void removeAccessOrder(String key) {
+        cacheLock.lock();
+        try {
+            accessOrder.remove(key);
+        } finally {
+            cacheLock.unlock();
+        }
     }
 
     private String urlEncode(String value) {

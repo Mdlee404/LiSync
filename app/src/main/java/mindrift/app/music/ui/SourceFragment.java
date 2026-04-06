@@ -136,15 +136,15 @@ public class SourceFragment extends Fragment {
             try (InputStream input = requireActivity().getContentResolver().openInputStream(uri)) {
                 if (input == null) return;
                 DocumentFile doc = DocumentFile.fromSingleUri(requireContext(), uri);
-                String name = doc != null ? doc.getName() : null;
-                if (name == null || name.trim().isEmpty()) {
-                    name = "import_" + System.currentTimeMillis() + ".js";
-                }
+                String name = doc != null && doc.getName() != null ? doc.getName() : "import_" + System.currentTimeMillis() + ".js";
                 scriptManager.importFromStream(name, input);
                 scriptManager.loadScripts();
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                mindrift.app.music.utils.Logger.warn("Import script failed: " + e.getMessage());
             }
-            requireActivity().runOnUiThread(this::refreshData);
+            if (isAdded()) {
+                requireActivity().runOnUiThread(this::refreshData);
+            }
         });
     }
 
@@ -290,48 +290,93 @@ public class SourceFragment extends Fragment {
         }
         Toast.makeText(requireContext(), getString(R.string.script_test_running), Toast.LENGTH_SHORT).show();
         executor.execute(() -> {
-            long start = SystemClock.elapsedRealtime();
-            try {
-                ScriptInfo info = scriptManager.getScriptInfo(scriptId);
-                String source = pickQuickTestSource(info);
-                if (source == null) {
-                    requireActivity().runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title),
-                            getString(R.string.script_test_unsupported_platform)));
-                    return;
+            ScriptTestResult result = performScriptTest(scriptId);
+            if (!isAdded()) return;
+            requireActivity().runOnUiThread(() -> {
+                if (result.success) {
+                    String message = getString(R.string.script_test_success, result.source, result.costMs) + "\n" + result.url;
+                    showTestDialog(getString(R.string.script_test_result_title), message);
+                } else {
+                    showTestDialog(getString(R.string.script_test_result_title),
+                            getString(R.string.script_test_failed, result.errorMessage));
                 }
-                SearchService.SearchResult searchResult = searchService.search(source, DEFAULT_TEST_KEYWORD, 1, 1);
-                if (searchResult == null || searchResult.results == null || searchResult.results.isEmpty()) {
-                    requireActivity().runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title),
-                            getString(R.string.script_test_failed, "search seed song failed")));
-                    return;
-                }
-                String songId = searchResult.results.get(0).id;
-                ResolveRequest request = new ResolveRequest();
-                request.setSource(source);
-                request.setAction("musicUrl");
-                request.setQuality("128k");
-                request.setNocache(true);
-                request.setTargetScriptId(scriptId);
-                ResolveRequest.MusicInfo musicInfo = new ResolveRequest.MusicInfo();
-                musicInfo.songmid = songId;
-                musicInfo.hash = songId;
-                request.setMusicInfo(musicInfo);
-                String response = requestProxy.resolveSync(request);
-                String url = extractResolvedUrl(response);
-                long costMs = SystemClock.elapsedRealtime() - start;
-                if (url == null || url.isEmpty()) {
-                    requireActivity().runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title),
-                            getString(R.string.script_test_failed, "no playable url")));
-                    return;
-                }
-                String message = getString(R.string.script_test_success, source, costMs) + "\n" + url;
-                requireActivity().runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title), message));
-            } catch (Exception e) {
-                String message = e.getMessage() == null ? "unknown" : e.getMessage();
-                requireActivity().runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title),
-                        getString(R.string.script_test_failed, message)));
-            }
+            });
         });
+    }
+
+    /**
+     * 脚本测试结果
+     */
+    private static class ScriptTestResult {
+        final boolean success;
+        final String source;
+        final long costMs;
+        final String url;
+        final String errorMessage;
+
+        ScriptTestResult(boolean success, String source, long costMs, String url, String errorMessage) {
+            this.success = success;
+            this.source = source;
+            this.costMs = costMs;
+            this.url = url;
+            this.errorMessage = errorMessage;
+        }
+
+        static ScriptTestResult success(String source, long costMs, String url) {
+            return new ScriptTestResult(true, source, costMs, url, null);
+        }
+
+        static ScriptTestResult failure(String errorMessage) {
+            return new ScriptTestResult(false, null, 0, null, errorMessage);
+        }
+    }
+
+    /**
+     * 执行脚本测试，返回详细结果
+     */
+    private ScriptTestResult performScriptTest(String scriptId) {
+        if (scriptId == null || scriptId.trim().isEmpty()) {
+            return ScriptTestResult.failure("invalid script id");
+        }
+        if (requestProxy == null) {
+            return ScriptTestResult.failure("RequestProxy unavailable");
+        }
+        long start = SystemClock.elapsedRealtime();
+        try {
+            ScriptInfo info = scriptManager.getScriptInfo(scriptId);
+            String source = pickQuickTestSource(info);
+            if (source == null) {
+                return ScriptTestResult.failure(getString(R.string.script_test_unsupported_platform));
+            }
+            SearchService.SearchResult searchResult = searchService.search(source, DEFAULT_TEST_KEYWORD, 1, 1);
+            if (searchResult == null || searchResult.results == null || searchResult.results.isEmpty()) {
+                return ScriptTestResult.failure("search seed song failed");
+            }
+            String songId = searchResult.results.get(0).id;
+            if (songId == null || songId.trim().isEmpty()) {
+                return ScriptTestResult.failure("search seed song failed");
+            }
+            ResolveRequest request = new ResolveRequest();
+            request.setSource(source);
+            request.setAction("musicUrl");
+            request.setQuality("128k");
+            request.setNocache(true);
+            request.setTargetScriptId(scriptId);
+            ResolveRequest.MusicInfo musicInfo = new ResolveRequest.MusicInfo();
+            musicInfo.songmid = songId;
+            musicInfo.hash = songId;
+            request.setMusicInfo(musicInfo);
+            String response = requestProxy.resolveSync(request);
+            String url = extractResolvedUrl(response);
+            long costMs = SystemClock.elapsedRealtime() - start;
+            if (url == null || url.isEmpty()) {
+                return ScriptTestResult.failure("no playable url");
+            }
+            return ScriptTestResult.success(source, costMs, url);
+        } catch (Exception e) {
+            String message = e.getMessage() == null ? "unknown" : e.getMessage();
+            return ScriptTestResult.failure(message);
+        }
     }
 
     private String buildCloudImportUrl(ScriptManager.CloudScriptEntry entry) {
@@ -370,57 +415,42 @@ public class SourceFragment extends Fragment {
 
     private void runCloudInitTests(List<String> scriptIds) {
         if (scriptIds == null || scriptIds.isEmpty()) return;
-        int available = 0;
-        int unavailable = 0;
+        // 测试每个脚本并收集结果
+        java.util.List<ScriptTestResult> results = new java.util.ArrayList<>();
         for (String scriptId : scriptIds) {
             if (scriptId == null || scriptId.trim().isEmpty()) {
-                unavailable++;
+                results.add(ScriptTestResult.failure("invalid script id"));
                 continue;
             }
-            if (testScriptAvailability(scriptId.trim())) {
-                available++;
+            results.add(performScriptTest(scriptId.trim()));
+        }
+        // 构建详细结果消息
+        StringBuilder message = new StringBuilder();
+        int successCount = 0;
+        int failCount = 0;
+        for (int i = 0; i < results.size(); i++) {
+            ScriptTestResult result = results.get(i);
+            if (i > 0) message.append("\n\n");
+            if (result.success) {
+                successCount++;
+                message.append("✓ 测试成功\n");
+                message.append("源: ").append(result.source).append("\n");
+                message.append("耗时: ").append(result.costMs).append("ms\n");
+                message.append("URL: ").append(result.url);
             } else {
-                unavailable++;
+                failCount++;
+                String scriptId = scriptIds.get(i);
+                message.append("✗ 测试失败 (").append(scriptId).append(")\n");
+                message.append("原因: ").append(result.errorMessage);
             }
         }
-        int finalAvailable = available;
-        int finalUnavailable = unavailable;
-        requireActivity().runOnUiThread(() -> showTestDialog(
-                getString(R.string.script_test_result_title),
-                getString(R.string.cloud_test_finished, finalAvailable, finalUnavailable)
-        ));
-    }
-
-    private boolean testScriptAvailability(String scriptId) {
-        if (requestProxy == null || scriptId == null || scriptId.isEmpty()) return false;
-        try {
-            ScriptInfo info = scriptManager.getScriptInfo(scriptId);
-            String source = pickQuickTestSource(info);
-            if (source == null) return false;
-            SearchService.SearchResult searchResult = searchService.search(source, DEFAULT_TEST_KEYWORD, 1, 1);
-            if (searchResult == null || searchResult.results == null || searchResult.results.isEmpty()) {
-                return false;
-            }
-            String songId = searchResult.results.get(0).id;
-            if (songId == null || songId.trim().isEmpty()) {
-                return false;
-            }
-            ResolveRequest request = new ResolveRequest();
-            request.setSource(source);
-            request.setAction("musicUrl");
-            request.setQuality("128k");
-            request.setNocache(true);
-            request.setTargetScriptId(scriptId);
-            ResolveRequest.MusicInfo musicInfo = new ResolveRequest.MusicInfo();
-            musicInfo.songmid = songId;
-            musicInfo.hash = songId;
-            request.setMusicInfo(musicInfo);
-            String response = requestProxy.resolveSync(request);
-            String url = extractResolvedUrl(response);
-            return url != null && !url.trim().isEmpty();
-        } catch (Exception e) {
-            return false;
+        // 如果有多个脚本，添加汇总
+        if (scriptIds.size() > 1) {
+            message.insert(0, "测试完成: " + successCount + " 个成功, " + failCount + " 个失败\n\n");
         }
+        final String finalMessage = message.toString();
+        if (!isAdded()) return;
+        requireActivity().runOnUiThread(() -> showTestDialog(getString(R.string.script_test_result_title), finalMessage));
     }
 
     private String pickQuickTestSource(ScriptInfo info) {

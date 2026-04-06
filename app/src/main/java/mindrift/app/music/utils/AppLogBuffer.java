@@ -23,8 +23,13 @@ public final class AppLogBuffer {
                 LINES.removeFirst();
             }
         }
+        // 在 try-catch 中调用每个 listener，防止异常影响其他 listener
         for (LogListener listener : LISTENERS) {
-            listener.onLogAdded(line);
+            try {
+                listener.onLogAdded(line);
+            } catch (Exception e) {
+                // 防止 listener 异常影响其他 listener
+            }
         }
     }
 

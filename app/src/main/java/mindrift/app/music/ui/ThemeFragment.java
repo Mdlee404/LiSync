@@ -117,9 +117,8 @@ public class ThemeFragment extends Fragment {
     public void onDestroy() {
         super.onDestroy();
         executor.shutdownNow();
-        if (!transferInProgress) {
-            cleanupExtractedDir();
-        }
+        // 总是清理临时目录，避免残留
+        cleanupExtractedDir();
     }
 
     private void handlePickResult(Uri uri) {
@@ -378,7 +377,8 @@ public class ThemeFragment extends Fragment {
             }
         } catch (Exception e) {
             deleteRecursively(workDir);
-            throw new Exception(getString(R.string.theme_transfer_extract_failed, e.getMessage()));
+            // 保留原始异常信息
+            throw new Exception(getString(R.string.theme_transfer_extract_failed, e.getMessage()), e);
         }
         File themeRoot = resolveThemeRoot(workDir);
         if (themeRoot == null) {

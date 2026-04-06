@@ -7,7 +7,10 @@ import java.util.Locale;
 
 public final class Logger {
     private static final String TAG = "LiSync";
-    private static final SimpleDateFormat FORMAT = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US);
+    // 使用 ThreadLocal 解决 SimpleDateFormat 线程安全问题
+    private static final ThreadLocal<SimpleDateFormat> FORMAT = ThreadLocal.withInitial(
+            () -> new SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+    );
 
     private Logger() {}
 
@@ -36,7 +39,7 @@ public final class Logger {
     }
 
     private static void log(String level, String message, Throwable t) {
-        String timestamp = FORMAT.format(new Date());
+        String timestamp = FORMAT.get().format(new Date());
         String line = "[" + timestamp + "] " + level + " " + message;
         switch (level) {
             case "D":
