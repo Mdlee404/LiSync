@@ -41,6 +41,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
+import java.util.Locale;
 import mindrift.app.music.App;
 import mindrift.app.music.core.lyric.LyricService;
 import mindrift.app.music.core.script.ScriptManager;
@@ -50,6 +51,7 @@ import mindrift.app.music.model.ResolveRequest;
 import mindrift.app.music.utils.Logger;
 import mindrift.app.music.utils.PlatformUtils;
 import mindrift.app.music.utils.NotificationHelper;
+import mindrift.app.music.utils.SettingsStore;
 
 public class XiaomiWearableManager {
     private static final String ACTION_CAPABILITIES = "capabilities";
@@ -76,6 +78,7 @@ public class XiaomiWearableManager {
     private static final String ACTION_THEME_FILE_FINISH = "theme.file.finish";
     private static final String ACTION_THEME_FINISH = "theme.finish";
     private static final String ACTION_THEME_CANCEL = "theme.cancel";
+    private static final String ACTION_LICENSE_EXPIRY = "license.expiry";
     private static final long MAX_UPLOAD_SIZE = 5 * 1024 * 1024L;
     private static final int UPLOAD_CHUNK_SIZE = 8 * 1024;
     private static final long UPLOAD_TIMEOUT_MS = 30000L;
@@ -208,6 +211,7 @@ public class XiaomiWearableManager {
         this.messageApi = Wearable.getMessageApi(this.context);
         this.authApi = Wearable.getAuthApi(this.context);
         this.serviceApi = Wearable.getServiceApi(this.context);
+        restorePersistedLicenseExpiry();
     }
 
     public void start() {
@@ -440,6 +444,10 @@ public class XiaomiWearableManager {
                 handleLyric(nodeId, json, requestId);
                 return;
             }
+            if (ACTION_LICENSE_EXPIRY.equalsIgnoreCase(action)) {
+                handleLicenseExpiry(json);
+                return;
+            }
             ResolveRequest request;
             try {
                 request = gson.fromJson(payload, ResolveRequest.class);
@@ -550,6 +558,29 @@ public class XiaomiWearableManager {
         data.put("rlyric", result.rlyric);
         data.put("lxlyric", result.lxlyric);
         sendMessage(nodeId, gson.toJson(buildSuccessPayload(ACTION_LYRIC, data, buildInfo("lyric", normalizedPlatform, id, null, null), requestId)));
+    }
+
+    private void handleLicenseExpiry(JsonObject json) {
+        if (json == null) return;
+        long rawExpireAt = getLong(json, "expireAt", -1L);
+        if (rawExpireAt <= 0) {
+            Logger.warn("License expiry received but expireAt missing or invalid");
+            return;
+        }
+        String deviceId = getString(json, "deviceId");
+        if (deviceId != null) {
+            deviceId = deviceId.trim();
+        }
+        long expireAtMs = normalizeExpireAt(rawExpireAt);
+        LicenseExpirySnapshot snapshot = buildLicenseExpirySnapshot(expireAtMs);
+        Logger.info("License expiry received: raw=" + rawExpireAt + " normalizedMs=" + expireAtMs + " deviceId=" + deviceId);
+        Logger.info("License expiry: title=" + snapshot.title + " message=" + snapshot.message + " listener=" + (licenseExpiryListener != null ? "set" : "null"));
+        updatePendingLicenseExpiry(expireAtMs, deviceId);
+        if (licenseExpiryListener != null) {
+            licenseExpiryListener.onLicenseExpiry(expireAtMs, snapshot.title, snapshot.message);
+        } else {
+            Logger.info("License expiry saved as pending, listener will be notified when set");
+        }
     }
 
     private void handleLogUpload(String nodeId, JsonObject json, String requestId) {
@@ -1207,6 +1238,97 @@ public class XiaomiWearableManager {
         void onProgress(int percent, int filesSent, int totalFiles);
         void onSuccess(String themeId);
         void onFailure(String message);
+    }
+
+    public interface LicenseExpiryListener {
+        void onLicenseExpiry(long expireAt, String title, String message);
+    }
+
+    private volatile LicenseExpiryListener licenseExpiryListener;
+    private volatile long pendingLicenseExpireAt = 0L;
+    private volatile String pendingLicenseTitle = null;
+    private volatile String pendingLicenseMessage = null;
+    private volatile String pendingLicenseDeviceId = null;
+
+    public void setLicenseExpiryListener(LicenseExpiryListener listener) {
+        this.licenseExpiryListener = listener;
+        if (pendingLicenseExpireAt > 0 && listener != null) {
+            LicenseExpirySnapshot snapshot = buildLicenseExpirySnapshot(pendingLicenseExpireAt);
+            Logger.info("Notifying pending license expiry to new listener");
+            listener.onLicenseExpiry(pendingLicenseExpireAt, snapshot.title, snapshot.message);
+        }
+    }
+
+    public long getPendingLicenseExpireAt() {
+        return pendingLicenseExpireAt;
+    }
+
+    public String getPendingLicenseTitle() {
+        if (pendingLicenseExpireAt > 0) {
+            pendingLicenseTitle = buildLicenseExpirySnapshot(pendingLicenseExpireAt).title;
+        }
+        return pendingLicenseTitle;
+    }
+
+    public String getPendingLicenseMessage() {
+        if (pendingLicenseExpireAt > 0) {
+            pendingLicenseMessage = buildLicenseExpirySnapshot(pendingLicenseExpireAt).message;
+        }
+        return pendingLicenseMessage;
+    }
+
+    public String getPendingLicenseDeviceId() {
+        return pendingLicenseDeviceId;
+    }
+
+    private void restorePersistedLicenseExpiry() {
+        long storedExpireAt = SettingsStore.getLicenseExpireAt(context);
+        String storedDeviceId = SettingsStore.getLicenseDeviceId(context);
+        if (storedExpireAt <= 0L && (storedDeviceId == null || storedDeviceId.isEmpty())) return;
+        pendingLicenseExpireAt = storedExpireAt;
+        pendingLicenseDeviceId = storedDeviceId;
+        LicenseExpirySnapshot snapshot = buildLicenseExpirySnapshot(storedExpireAt);
+        pendingLicenseTitle = snapshot.title;
+        pendingLicenseMessage = snapshot.message;
+        Logger.info("Restored persisted license expiry: " + storedExpireAt + "ms deviceId=" + storedDeviceId);
+    }
+
+    private void updatePendingLicenseExpiry(long expireAtMs, String deviceId) {
+        pendingLicenseExpireAt = expireAtMs;
+        pendingLicenseDeviceId = deviceId == null ? "" : deviceId.trim();
+        LicenseExpirySnapshot snapshot = buildLicenseExpirySnapshot(expireAtMs);
+        pendingLicenseTitle = snapshot.title;
+        pendingLicenseMessage = snapshot.message;
+        SettingsStore.setLicenseExpireAt(context, expireAtMs);
+        SettingsStore.setLicenseDeviceId(context, pendingLicenseDeviceId);
+    }
+
+    private long normalizeExpireAt(long rawExpireAt) {
+        if (rawExpireAt <= 0L) return 0L;
+        return rawExpireAt >= 1_000_000_000_000L ? rawExpireAt : rawExpireAt * 1000L;
+    }
+
+    private LicenseExpirySnapshot buildLicenseExpirySnapshot(long expireAtMs) {
+        if (expireAtMs <= 0L) {
+            return new LicenseExpirySnapshot("订阅状态", "");
+        }
+        java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
+        String expireDateStr = sdf.format(new java.util.Date(expireAtMs));
+        boolean expired = expireAtMs <= System.currentTimeMillis();
+        return new LicenseExpirySnapshot(
+                expired ? "订阅已到期" : "订阅有效期",
+                expireDateStr
+        );
+    }
+
+    private static final class LicenseExpirySnapshot {
+        final String title;
+        final String message;
+
+        LicenseExpirySnapshot(String title, String message) {
+            this.title = title;
+            this.message = message;
+        }
     }
 
     public static class ThemeTransferOptions {

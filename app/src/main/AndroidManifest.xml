@@ -28,23 +28,11 @@
         </activity>
 
         <activity
-            android:name=".ui.MainActivity"
-            android:exported="false" />
-
-        <activity
             android:name=".ui.HomeContainerActivity"
             android:exported="false" />
 
         <activity
-            android:name=".ui.SettingsActivity"
-            android:exported="false" />
-
-        <activity
             android:name=".ui.SearchPlayActivity"
-            android:exported="false" />
-
-        <activity
-            android:name=".ui.ScriptCenterActivity"
             android:exported="false" />
 
         <activity
@@ -57,14 +45,6 @@
 
         <activity
             android:name=".ui.DiagnosticsActivity"
-            android:exported="false" />
-
-        <activity
-            android:name=".ui.ToolsActivity"
-            android:exported="false" />
-
-        <activity
-            android:name=".ui.ThemeTransferActivity"
             android:exported="false" />
 
         <service

@@ -229,6 +229,15 @@
     <string name="dock_theme">主题</string>
     <string name="home_status_label">运行状态</string>
     <string name="home_connection_label">连接情况</string>
+    <string name="home_license_label">订阅信息</string>
+    <string name="home_license_title_default">手表订阅状态</string>
+    <string name="home_license_expire_at">订阅有效期至：%1$s</string>
+    <string name="home_license_expired_at">订阅已到期：%1$s</string>
+    <string name="home_license_device_id_value">设备 ID：%1$s</string>
+    <string name="home_license_device_id_unknown">设备 ID：未同步</string>
+    <string name="action_renew_license">为当前设备续订</string>
+    <string name="renew_license_open_failed">无法打开续订页面</string>
+    <string name="license_device_id_copied">设备 ID 已复制</string>
 
     <string name="action_music_url">播放链接 (musicUrl)</string>
     <string name="action_search">搜索 (search)</string>
@@ -239,9 +248,14 @@
     <string name="notification_channel_status_desc">LiSync 后台常驻通知</string>
     <string name="notification_channel_error">请求错误</string>
     <string name="notification_channel_error_desc">请求异常提醒</string>
+    <string name="notification_channel_info">订阅信息</string>
+    <string name="notification_channel_info_desc">订阅到期提醒</string>
     <string name="notification_status_title">LiSync 正在运行</string>
     <string name="notification_status_text">后台常驻已启用，等待手表请求</string>
     <string name="notification_error_title">请求失败</string>
+    <string name="notification_info_title">订阅提醒</string>
+    <string name="license_status_loading">订阅到期时间：等待手表同步...</string>
+    <string name="license_status_unknown">订阅到期时间：未获取</string>
     <string name="notification_prompt_title">通知异常</string>
     <string name="notification_prompt_permission">未授予通知权限，请在系统设置中开启通知权限。</string>
     <string name="notification_prompt_disabled">应用通知开关已关闭，请在系统设置中开启通知。</string>

@@ -14,13 +14,16 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
 import mindrift.app.music.R;
-import mindrift.app.music.ui.MainActivity;
+import mindrift.app.music.ui.DockBarHelper;
+import mindrift.app.music.ui.HomeContainerActivity;
 
 public final class NotificationHelper {
     public static final String CHANNEL_STATUS = "lisync_status";
     public static final String CHANNEL_ERROR = "lisync_error";
+    public static final String CHANNEL_INFO = "lisync_info";
     public static final int NOTIFY_ID_STATUS = 1001;
     public static final int NOTIFY_ID_ERROR = 2001;
+    public static final int NOTIFY_ID_INFO = 3001;
     private static final long ERROR_THROTTLE_MS = 8000L;
     private static volatile long lastErrorAt = 0L;
     private static volatile String lastErrorKey = null;
@@ -47,8 +50,16 @@ public final class NotificationHelper {
         );
         errorChannel.setDescription(context.getString(R.string.notification_channel_error_desc));
 
+        NotificationChannel infoChannel = new NotificationChannel(
+                CHANNEL_INFO,
+                context.getString(R.string.notification_channel_info),
+                NotificationManager.IMPORTANCE_DEFAULT
+        );
+        infoChannel.setDescription(context.getString(R.string.notification_channel_info_desc));
+
         manager.createNotificationChannel(statusChannel);
         manager.createNotificationChannel(errorChannel);
+        manager.createNotificationChannel(infoChannel);
     }
 
     public static boolean canPost(Context context) {
@@ -59,7 +70,7 @@ public final class NotificationHelper {
     }
 
     public static Notification buildOngoing(Context context) {
-        Intent intent = new Intent(context, MainActivity.class);
+        Intent intent = HomeContainerActivity.newIntent(context, DockBarHelper.TAB_HOME);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent pendingIntent = PendingIntent.getActivity(
                 context,
@@ -108,6 +119,24 @@ public final class NotificationHelper {
                 .setAutoCancel(true)
                 .build();
         NotificationManagerCompat.from(context).notify(NOTIFY_ID_ERROR, notification);
+    }
+
+    public static void notifyInfo(Context context, String title, String message) {
+        if (context == null || !canPost(context)) return;
+        String safeTitle = title == null || title.trim().isEmpty()
+                ? context.getString(R.string.notification_info_title)
+                : title.trim();
+        String safeMessage = message == null ? "" : message.trim();
+        ensureChannels(context);
+        String shortMessage = safeMessage.length() > 160 ? safeMessage.substring(0, 160) + "..." : safeMessage;
+        Notification notification = new NotificationCompat.Builder(context, CHANNEL_INFO)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle(safeTitle)
+                .setContentText(shortMessage)
+                .setStyle(new NotificationCompat.BigTextStyle().bigText(safeMessage))
+                .setAutoCancel(true)
+                .build();
+        NotificationManagerCompat.from(context).notify(NOTIFY_ID_INFO, notification);
     }
 
     public static boolean isStatusNotificationActive(Context context) {
